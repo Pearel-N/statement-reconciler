@@ -172,3 +172,42 @@ Ranking the candidates and showing the best guess would look more capable and
 be strictly worse: to the user a ranked guess is indistinguishable from a
 proven answer. In an app whose claim is knowing when it is wrong, a confident
 wrong explanation costs more than silence.
+
+---
+
+## Day 3
+
+### The PDF is parsed once, for two different consumers
+
+The model needs text it can read as a table: rows in order, columns aligned,
+empty cells still visibly empty. Debit and credit are distinguished by *where*
+a number sits, so any representation that collapses horizontal position
+destroys the difference between money in and money out — which is precisely
+the field the reconciliation arithmetic depends on.
+
+Provenance needs the opposite: exact coordinates for every fragment, so a row
+the model returns can be traced back to a region of the page.
+
+`parsePdf` produces both from one pass. `items` keeps raw positioned
+fragments; `layout` renders each line as fixed-width text, padding to the
+column each fragment's x position implies. Padding rather than joining is the
+point: a row with an empty debit column produces no fragment there at all, and
+joining with single spaces would silently close the gap and make a credit read
+as a debit.
+
+### Coordinates are computed, never requested from the model
+
+A model handed plain text cannot know where on the page that text was. Any
+coordinates it returned would be invented, and invented provenance in an app
+built on verified correctness is worse than none. So the parser records
+positions and the model is asked only for values.
+
+PDF measures from the bottom-left; this converts to top-left once, at the
+boundary, so nothing downstream has to remember which way up the page is.
+
+### "No text layer" is a threshold, not a zero check
+
+A scanned page often carries a stray character from a header stamp or a
+watermark. Refusing only on exactly zero characters would let those through
+into extraction, where the model would hallucinate a statement out of nothing.
+Forty characters across the whole document is the line.
