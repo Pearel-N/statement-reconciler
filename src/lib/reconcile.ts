@@ -208,7 +208,7 @@ export function classifyBreaks(breaks: BalanceBreak[]): Flag[] {
         severity: "error" as const,
         rowIndex,
         detail:
-          `The balance jumps by ${size} at the top of this page. ` +
+          `The balance at the top of this page differs by ${size}. ` +
           `Expected ${expected.toString()}, the statement shows ${actual.toString()}. ` +
           `A row was probably lost between pages.`,
       };

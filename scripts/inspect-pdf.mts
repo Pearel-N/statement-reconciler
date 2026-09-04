@@ -8,7 +8,7 @@
 
 import { readFileSync } from "node:fs";
 
-import { pagesAsText, parsePdf } from "../src/lib/pdf/parse.ts";
+import { pagesAsText, parsePdf } from "@/lib/pdf/parse";
 
 const files = process.argv.slice(2);
 

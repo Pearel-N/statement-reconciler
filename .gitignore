@@ -47,3 +47,6 @@ tsconfig.tsbuildinfo
 
 # prisma generated client
 /src/generated
+
+# cached model output, dev only
+/.extraction-cache

@@ -141,9 +141,9 @@ export async function parsePdf(
   const task = pdfjs.getDocument({
     data,
     password: options.password,
-    // This runs on the server against files strangers uploaded. Neither of
-    // these is needed to read a text layer, and both widen the attack surface.
-    isEvalSupported: false,
+    // This runs on the server against files strangers uploaded. Reading a
+    // text layer needs no local fonts, and not reaching for them keeps the
+    // parse self-contained.
     useSystemFonts: false,
   });
 

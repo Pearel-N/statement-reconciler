@@ -211,3 +211,14 @@ A scanned page often carries a stray character from a header stamp or a
 watermark. Refusing only on exactly zero characters would let those through
 into extraction, where the model would hallucinate a statement out of nothing.
 Forty characters across the whole document is the line.
+
+### The stored model output is what corrections replay against
+
+`statements.raw_extraction` holds the model's unedited answer. Re-running
+reconciliation after a human corrects a row must never call the model again —
+it replays that stored output with the correction applied.
+
+That is what makes the discrepancy shrink live as someone works, rather than
+after a wait and another API charge. It also means a bad extraction can be
+debugged, and the downstream code re-run against it, without paying to
+reproduce it.
