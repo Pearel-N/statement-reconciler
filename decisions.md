@@ -155,3 +155,20 @@ storage whether the object exists and records storage's byte count, not the
 one the browser claimed. It also refuses any storage path outside the
 requesting workspace's own prefix, so a crafted request can't attach someone
 else's file to a workspace.
+
+### Localisation reports one flag per break, and stays silent when unsure
+
+Two rules govern what the review screen is allowed to say.
+
+One flag per break, with no merging of consecutive breaks. Merging made sense
+against an accumulating walk, where a single misread row produced a cascade of
+identical gaps. Re-anchoring removed the cascade, so two breaks are now two
+genuinely separate problems and grouping them would hide real errors.
+
+And residual explanations only fire on a unique match. If two rows equally
+explain a discrepancy, the arithmetic cannot say which is wrong, and naming
+both would send a human to re-read a correct row as often as an incorrect one.
+Ranking the candidates and showing the best guess would look more capable and
+be strictly worse: to the user a ranked guess is indistinguishable from a
+proven answer. In an app whose claim is knowing when it is wrong, a confident
+wrong explanation costs more than silence.

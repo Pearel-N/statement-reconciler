@@ -137,7 +137,7 @@ describe("walkRunningBalance", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Localisation — yours. These fail until you write it.
+// Localisation
 // ---------------------------------------------------------------------------
 
 describe("classifyBreaks", () => {
@@ -212,5 +212,45 @@ describe("explainResidualDiscrepancy", () => {
     ];
 
     expect(explainResidualDiscrepancy(d("37.41"), rows)).toEqual([]);
+  });
+});
+
+describe("explainResidualDiscrepancy, further cases", () => {
+  it("spots a row that was extracted twice", () => {
+    // A duplicated 750 credit inflates the extracted total by 750, so the
+    // discrepancy (expected - actual) comes out at -750.
+    nextIndex = 0;
+    const rows = [
+      row({ amount: d(1500), direction: "debit" }),
+      row({ amount: d(750), direction: "credit", description: "SALARY" }),
+      row({ amount: d(750), direction: "credit", description: "SALARY" }),
+    ];
+
+    const flags = explainResidualDiscrepancy(d(-750), rows);
+
+    expect(flags).toHaveLength(1);
+    expect(flags[0].flagType).toBe("duplicate_suspect");
+    // The later of the pair is the copy; the earlier is the original.
+    expect(flags[0].rowIndex).toBe(2);
+  });
+
+  it("stays silent when two rows equally explain the gap", () => {
+    // Both rows are worth half the discrepancy. The arithmetic cannot say
+    // which one is wrong, and naming both would send a human to re-read a
+    // correct row as often as an incorrect one.
+    nextIndex = 0;
+    const rows = [
+      row({ amount: d(2000), direction: "debit" }),
+      row({ amount: d(2000), direction: "debit" }),
+    ];
+
+    expect(explainResidualDiscrepancy(d(4000), rows)).toEqual([]);
+  });
+
+  it("does nothing when the statement already reconciles", () => {
+    nextIndex = 0;
+    const rows = [row({ amount: d(2000), direction: "debit" })];
+
+    expect(explainResidualDiscrepancy(d(0), rows)).toEqual([]);
   });
 });

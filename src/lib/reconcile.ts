@@ -174,58 +174,157 @@ export function walkRunningBalance(
 // ---------------------------------------------------------------------------
 
 /**
- * TODO(you): turn raw balance breaks into flags a human can act on.
+ * Turns raw balance breaks into flags a human can act on.
  *
- * See `reconcile.test.ts` — the failing tests are the specification.
+ * One flag per break, deliberately. An earlier version merged consecutive
+ * breaks that shared a gap, on the theory that they had one cause — but
+ * `walkRunningBalance` re-anchors on the printed balance after every row, so
+ * consecutive breaks are genuinely separate problems, not echoes of one. The
+ * merging belonged to the naive walk, and disappeared with it.
  *
- * The distinctions that matter:
+ * The distinction being drawn is between two different diagnoses:
  *
- *  - A break on a row that starts a new page is usually a *missing row*: rows
- *    lost in the seam between two pages of a table. That is
- *    `page_boundary_gap`, and the gap is the amount that went missing.
+ *  - A break on a row that opens a new page is usually a *missing row*. Table
+ *    rows get lost in the seam between pages far more often than a number is
+ *    misread exactly at a page break.
+ *  - A break inside a page is usually a *misread row* — wrong amount, or a
+ *    debit read as a credit.
  *
- *  - A break in the middle of a page is usually a *misread row*: a wrong
- *    amount or a flipped direction on that row. That is
- *    `running_balance_break`.
- *
- *  - A break whose gap is exactly twice a row's amount is a direction flip,
- *    not a wrong number — worth saying so, because the fix is one click.
- *
- * Severity: a break is `error` (the arithmetic is provably broken). Reserve
- * `warning` for things that are suspicious but might be legitimate.
+ * Both are `error` severity: the arithmetic is provably broken either way.
+ * `warning` is reserved for things that are suspicious but might be fine.
  */
 export function classifyBreaks(breaks: BalanceBreak[]): Flag[] {
-  void breaks;
-  return [];
+  return breaks.map((balanceBreak) => {
+    const { rowIndex, expected, actual, gap, crossesPageBoundary } =
+      balanceBreak;
+
+    // The gap's sign says which way the balance moved; for a human the size
+    // is what matters, and the expected/actual pair already shows direction.
+    const size = gap.abs().toString();
+
+    if (crossesPageBoundary) {
+      return {
+        flagType: "page_boundary_gap" as const,
+        severity: "error" as const,
+        rowIndex,
+        detail:
+          `The balance jumps by ${size} at the top of this page. ` +
+          `Expected ${expected.toString()}, the statement shows ${actual.toString()}. ` +
+          `A row was probably lost between pages.`,
+      };
+    }
+
+    return {
+      flagType: "running_balance_break" as const,
+      severity: "error" as const,
+      rowIndex,
+      detail:
+        `This row's balance is off by ${size}. ` +
+        `Expected ${expected.toString()}, the statement shows ${actual.toString()}. ` +
+        `The amount or the debit/credit direction on this row is probably wrong.`,
+    };
+  });
 }
 
 /**
- * TODO(you): explain a discrepancy that the running-balance walk did not.
+ * Explains a discrepancy the running-balance walk could not.
  *
- * This is the harder half. It runs when the statement reconciles row-to-row
- * but still doesn't match its declared opening and closing balances — or when
- * the statement has no running-balance column at all and there is nothing to
- * walk.
+ * Runs when the rows agree with each other but not with the declared opening
+ * and closing balances — or, more often, when the layout prints no
+ * running-balance column at all and there is nothing to walk.
  *
- * Hypotheses worth testing, cheapest first:
+ * Two hypotheses, both testable rather than guessed at:
  *
- *  - A single row's direction was flipped. Flipping a row changes the delta
- *    by exactly twice its amount, so a row whose amount is `discrepancy / 2`
- *    is a strong suspect.
- *  - A single row was missed entirely: the discrepancy equals one plausible
- *    transaction amount.
- *  - A row was extracted twice: two rows share date, amount and description,
- *    and removing one closes the gap exactly.
+ *  1. **A flipped direction.** Reading a credit as a debit doesn't move the
+ *     total by the row's amount — it moves it by *twice* the amount, because
+ *     the row swings from adding to subtracting. So a row worth exactly half
+ *     the discrepancy, in the direction that would explain the sign, is a
+ *     strong suspect.
  *
- * Return an empty array when nothing explains it — an honest "the arithmetic
- * is off by X and I can't tell you why" beats a confident wrong guess.
+ *  2. **A row extracted twice.** If removing one of a duplicate pair would
+ *     close the gap exactly, the duplicate is the likely cause.
+ *
+ * Both only fire on a *unique* match. Two rows worth half the discrepancy
+ * means the arithmetic can't tell which one is wrong, and pointing at both
+ * would send a human to re-read two correct rows as often as one wrong one.
+ *
+ * When nothing fits, this returns nothing. "The arithmetic is off by X and I
+ * can't tell you why" is a worse answer than a confident explanation, but a
+ * far better one than a confident wrong explanation — and in an app whose
+ * whole claim is knowing when it's wrong, a bad guess costs more than silence.
  */
 export function explainResidualDiscrepancy(
   discrepancy: Decimal,
   rows: StatementRow[],
 ): Flag[] {
-  void discrepancy;
-  void rows;
+  if (discrepancy.isZero()) return [];
+
+  // --- Hypothesis 1: one row's direction was flipped ----------------------
+  //
+  // A debit that should have been a credit leaves the extracted total too
+  // low, so the discrepancy (expected - actual) comes out positive. The
+  // reverse leaves it negative.
+  const half = discrepancy.abs().dividedBy(2);
+  const flippedFrom: Direction = discrepancy.greaterThan(0)
+    ? "debit"
+    : "credit";
+
+  const flipSuspects = rows.filter(
+    (row) => row.direction === flippedFrom && row.amount.equals(half),
+  );
+
+  if (flipSuspects.length === 1) {
+    const suspect = flipSuspects[0];
+    const shouldBe: Direction =
+      flippedFrom === "debit" ? "credit" : "debit";
+
+    return [
+      {
+        flagType: "arithmetic_mismatch",
+        severity: "error",
+        rowIndex: suspect.rowIndex,
+        detail:
+          `The statement is out by ${discrepancy.abs().toString()}, which is exactly twice this row's ` +
+          `${suspect.amount.toString()}. It was read as a ${flippedFrom} and is probably a ${shouldBe}.`,
+      },
+    ];
+  }
+
+  // --- Hypothesis 2: one row was extracted twice --------------------------
+  //
+  // Removing a duplicate changes the total by that row's signed amount, so
+  // the duplicate that closes the gap is the one whose signed amount is the
+  // negative of the discrepancy.
+  const duplicateSuspects = rows.filter((row, index) => {
+    const isDuplicate = rows.some(
+      (other, otherIndex) =>
+        otherIndex !== index &&
+        other.description === row.description &&
+        other.direction === row.direction &&
+        other.amount.equals(row.amount),
+    );
+
+    return isDuplicate && signedAmount(row).negated().equals(discrepancy);
+  });
+
+  // A duplicate pair produces two matches — the same finding seen from both
+  // rows. Flag the later one: it is the copy, and the earlier is the original.
+  if (duplicateSuspects.length === 2) {
+    const copy = duplicateSuspects[1];
+
+    return [
+      {
+        flagType: "duplicate_suspect",
+        severity: "warning",
+        rowIndex: copy.rowIndex,
+        detail:
+          `This row is identical to an earlier one, and removing it would close ` +
+          `the ${discrepancy.abs().toString()} gap exactly. It was probably extracted twice.`,
+      },
+    ];
+  }
+
+  // Nothing fits. Say so by saying nothing.
   return [];
 }
 
