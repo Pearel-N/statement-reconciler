@@ -43,3 +43,7 @@ next-env.d.ts
 # local env
 .env
 .env.local
+tsconfig.tsbuildinfo
+
+# prisma generated client
+/src/generated

@@ -10,42 +10,22 @@ human to resolve exactly that and nothing else.
 
 The product is not extraction. It's *trustworthy* extraction.
 
-See [`SPEC.md`](./SPEC.md) for scope and [`decisions.md`](./decisions.md) for
-the reasoning behind each engineering choice.
-
----
+See [`decisions.md`](./decisions.md) for the reasoning behind each choice.
 
 ## Setup
 
-Requires Node 20+ and a Supabase project (free tier is enough).
-
 ```bash
-git clone <repo-url>
-cd statement-reconciler
 npm install
-cp .env.example .env
-# fill in .env from your Supabase project settings — see notes in the file
-npm run db:migrate
 npm run dev
 ```
 
-Open http://localhost:3000. A workspace is created for you and its ID goes in
-the URL. That URL is your key — there is no login (see `decisions.md`).
+Open http://localhost:3000. A workspace is created and its ID goes in the URL.
+That URL is the key — there is no login.
 
-### Supabase, once
+## Where this is
 
-1. Create a project.
-2. **Storage → New bucket** named `statements`, **private**.
-3. **Project Settings → Database** for the two connection strings.
-4. **Project Settings → API** for the URL and the service role key.
+Upload only. Files are validated (size, type, PDF signature) but not yet
+stored: the upload route reports `unconfigured` and the UI says so rather than
+showing a success state for a file that went nowhere.
 
----
-
-## Scripts
-
-| Command | What it does |
-|---|---|
-| `npm run dev` | Dev server |
-| `npm run db:migrate` | Apply Prisma migrations |
-| `npm run db:studio` | Browse the database |
-| `npm run lint` | Lint |
+Extraction, reconciliation and review are not built yet.

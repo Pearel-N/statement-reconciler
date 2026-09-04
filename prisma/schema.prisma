@@ -1,0 +1,218 @@
+// Statement Reconciler — data model
+//
+// Two rules run through this whole file:
+//   1. Money is Decimal (Postgres numeric), never Float. Reconciliation
+//      arithmetic uses Decimal methods, never + and -.
+//   2. Nothing the model produces is trusted. Provenance and correction
+//      columns exist so every value can be traced back to the page it
+//      came from and every human fix is recorded rather than overwritten.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  // Pooled connection for app queries (pgbouncer, :6543).
+  url       = env("DATABASE_URL")
+  // Direct session connection for migrations (:5432). Without this,
+  // `prisma migrate` hangs against Supabase's pooler.
+  directUrl = env("DIRECT_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Enums
+// ---------------------------------------------------------------------------
+
+/// Load-bearing. Drives the progress UI and makes each async stage explicit,
+/// so processing can be resumed or retried from wherever it stopped.
+enum StatementStatus {
+  uploaded
+  parsing
+  extracting
+  reconciling
+  needs_review
+  verified
+  failed
+}
+
+/// Every failure is named. There is deliberately no generic "processing_failed".
+enum ErrorCode {
+  not_a_statement
+  password_required
+  incorrect_password
+  no_text_layer
+  unreadable_file
+  multiple_statements
+  file_too_large
+  extraction_failed
+}
+
+enum Direction {
+  debit
+  credit
+}
+
+/// Written by discrepancy localisation, read by the review UI.
+/// Note: there is no `low_confidence`. A flag derived from the model's own
+/// self-reported confidence would mean trusting the model at exactly the
+/// point this project claims not to. `unverifiable_row` is structural — the
+/// row is missing something the arithmetic needs.
+enum FlagType {
+  running_balance_break
+  page_boundary_gap
+  unverifiable_row
+  arithmetic_mismatch
+  duplicate_suspect
+  missing_field
+}
+
+enum Severity {
+  info
+  warning
+  error
+}
+
+// ---------------------------------------------------------------------------
+// Models
+// ---------------------------------------------------------------------------
+
+/// One uploaded PDF.
+///
+/// There is no `workspaces` table on purpose. A workspace is nothing but an
+/// unguessable UUID in the URL — it has no attributes, no members and no
+/// settings, so a table would hold one meaningless row per visitor.
+model Statement {
+  id          String @id @default(uuid()) @db.Uuid
+  workspaceId String @map("workspace_id") @db.Uuid
+
+  filename    String
+  storagePath String @map("storage_path")
+  fileBytes   Int    @map("file_bytes")
+
+  status      StatementStatus @default(uploaded)
+  errorCode   ErrorCode?      @map("error_code")
+  errorDetail String?         @map("error_detail")
+
+  // Statement-level facts, populated during extraction.
+  pageCount           Int?      @map("page_count")
+  bankName            String?   @map("bank_name")
+  accountNumberMasked String?   @map("account_number_masked")
+  periodStart         DateTime? @map("period_start") @db.Date
+  periodEnd           DateTime? @map("period_end") @db.Date
+
+  // The declared balances. These are the oracle: the transactions must
+  // account for the difference between them, or something was extracted wrong.
+  openingBalance Decimal? @map("opening_balance") @db.Decimal(18, 2)
+  closingBalance Decimal? @map("closing_balance") @db.Decimal(18, 2)
+  currency       String?  @db.VarChar(3)
+
+  /// The model's unedited output, kept so extraction can be debugged and
+  /// re-run without paying for another model call.
+  rawExtraction Json? @map("raw_extraction")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  processedAt DateTime? @map("processed_at")
+
+  transactions    Transaction[]
+  reconciliations Reconciliation[]
+  flags           Flag[]
+
+  @@index([workspaceId, createdAt])
+  @@map("statements")
+}
+
+model Transaction {
+  id          String @id @default(uuid()) @db.Uuid
+  statementId String @map("statement_id") @db.Uuid
+
+  /// Position within the statement as extracted. Ordering matters for
+  /// running-balance continuity checks across page boundaries.
+  rowIndex Int @map("row_index")
+
+  date        DateTime @db.Date
+  description String
+  amount      Decimal  @db.Decimal(18, 2)
+
+  /// Its own column rather than the sign of `amount`, so reconciliation reads
+  /// as credits.minus(debits) instead of depending on the extractor having
+  /// signed every row correctly.
+  direction Direction
+
+  /// Nullable: plenty of statement layouts omit a per-row balance. When it is
+  /// present it is the strongest continuity signal available.
+  runningBalance Decimal? @map("running_balance") @db.Decimal(18, 2)
+
+  // --- Provenance: present from the first migration, not retrofitted -------
+  sourcePage Int?  @map("source_page")
+  sourceBbox Json? @map("source_bbox")
+
+  /// How confidently this row's text was matched back to positioned PDF text
+  /// items when deriving the bbox. Computed here, never reported by the model.
+  bboxMatchConfidence Float? @map("bbox_match_confidence")
+
+  // --- Correction tracking -------------------------------------------------
+  isCorrected    Boolean   @default(false) @map("is_corrected")
+  originalValues Json?     @map("original_values")
+  correctedAt    DateTime? @map("corrected_at")
+
+  /// Maintained by a trigger in a raw migration; queried with raw SQL.
+  /// Prisma cannot select Unsupported columns, which is fine — it should
+  /// never be read as a value, only matched against.
+  searchVector Unsupported("tsvector")? @map("search_vector")
+
+  statement Statement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  flags     Flag[]
+
+  @@unique([statementId, rowIndex])
+  @@index([statementId, date])
+  @@index([statementId, amount])
+  @@map("transactions")
+}
+
+/// One row per reconciliation run, not per statement. Corrections trigger a
+/// re-run, and the history is what lets the UI show the discrepancy shrinking
+/// toward zero as the human works.
+model Reconciliation {
+  id          String @id @default(uuid()) @db.Uuid
+  statementId String @map("statement_id") @db.Uuid
+
+  /// closingBalance - openingBalance, as declared by the document.
+  expectedDelta Decimal @map("expected_delta") @db.Decimal(18, 2)
+  /// credits - debits, as extracted.
+  actualDelta Decimal @map("actual_delta") @db.Decimal(18, 2)
+  /// expectedDelta - actualDelta. Zero means the extraction is proven.
+  discrepancy  Decimal @db.Decimal(18, 2)
+  isReconciled Boolean @map("is_reconciled")
+
+  runAt DateTime @default(now()) @map("run_at")
+
+  statement Statement @relation(fields: [statementId], references: [id], onDelete: Cascade)
+
+  @@index([statementId, runAt])
+  @@map("reconciliations")
+}
+
+/// Where the hard part lives. Discrepancy localisation writes rows here;
+/// the review UI reads from here and shows the human only these.
+model Flag {
+  id          String  @id @default(uuid()) @db.Uuid
+  statementId String  @map("statement_id") @db.Uuid
+  /// Null for statement-level flags, e.g. balances missing entirely.
+  transactionId String? @map("transaction_id") @db.Uuid
+
+  flagType FlagType @map("flag_type")
+  severity Severity
+  detail   String
+
+  isResolved Boolean   @default(false) @map("is_resolved")
+  resolvedAt DateTime? @map("resolved_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  statement   Statement    @relation(fields: [statementId], references: [id], onDelete: Cascade)
+  transaction Transaction? @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([statementId, isResolved])
+  @@map("flags")
+}
