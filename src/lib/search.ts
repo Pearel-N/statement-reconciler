@@ -56,6 +56,21 @@ export interface TransactionHit {
   currency: string | null;
 }
 
+/**
+ * Flattens separators in the search text the same way the indexing trigger
+ * does, so a query tokenises the way the stored vector did.
+ *
+ * Quotes and a leading minus survive, because `websearch_to_tsquery` uses them
+ * for phrase search and exclusion and those are worth keeping. Slashes, dots
+ * and the rest become spaces: typing `UPI/DR` should find the same rows as
+ * typing `UPI DR`.
+ */
+function normaliseQuery(text: string | undefined): string | undefined {
+  if (!text) return undefined;
+  const cleaned = text.replace(/[^\w\s"'-]+/g, " ").replace(/\s+/g, " ").trim();
+  return cleaned === "" ? undefined : cleaned;
+}
+
 function conditions(query: TransactionQuery): Prisma.Sql[] {
   const parts: Prisma.Sql[] = [
     Prisma.sql`s.workspace_id = ${query.workspaceId}::uuid`,
@@ -69,9 +84,10 @@ function conditions(query: TransactionQuery): Prisma.Sql[] {
     parts.push(Prisma.sql`s.status IN ('verified', 'needs_review')`);
   }
 
-  if (query.text && query.text.trim() !== "") {
+  const text = normaliseQuery(query.text);
+  if (text) {
     parts.push(
-      Prisma.sql`t.search_vector @@ websearch_to_tsquery('simple', ${query.text})`,
+      Prisma.sql`t.search_vector @@ websearch_to_tsquery('simple', ${text})`,
     );
   }
 

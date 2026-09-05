@@ -36,6 +36,12 @@ export async function POST(
       );
     }
 
+    console.error("[process] stage threw", {
+      statementId: id,
+      message: (error as Error)?.message,
+      stack: (error as Error)?.stack,
+    });
+
     // A stage crashed in a way it didn't anticipate. The statement keeps its
     // current status so the next poll retries that stage rather than skipping
     // it — but the caller is told plainly rather than left polling forever.

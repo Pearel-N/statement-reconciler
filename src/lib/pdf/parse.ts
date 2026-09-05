@@ -153,6 +153,17 @@ export async function parsePdf(
     const name = (error as { name?: string })?.name;
     const code = (error as { code?: number })?.code;
 
+    // The user gets a clean, named message; the cause goes to the server log.
+    // Losing it means a production failure can only be guessed at, which is
+    // the position this project spent five days arguing against.
+    console.error("[parse] getDocument failed", {
+      name,
+      code,
+      message: (error as Error)?.message,
+      bytes: data.byteLength,
+      header: new TextDecoder().decode(data.subarray(0, 8)),
+    });
+
     if (name === "PasswordException") {
       // pdfjs distinguishes "needs one" (1) from "that one was wrong" (2),
       // and so should the message the user reads.
@@ -209,7 +220,10 @@ export async function parsePdf(
         lines: groupIntoLines(items),
       });
     }
-  } catch {
+  } catch (error) {
+    console.error("[parse] page read failed", {
+      message: (error as Error)?.message,
+    });
     return fail(
       "unreadable_file",
       "This file couldn't be read past the first few pages — it may be damaged.",
