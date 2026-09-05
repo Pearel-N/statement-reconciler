@@ -91,9 +91,17 @@ export default async function WorkspacePage({
 
         {statements.length > 0 && (
           <section className="mt-10">
-            <h2 className="text-xs font-medium uppercase tracking-wider text-stone-500">
-              Statements
-            </h2>
+            <div className="flex items-baseline justify-between">
+              <h2 className="text-xs font-medium uppercase tracking-wider text-stone-500">
+                Statements
+              </h2>
+              <Link
+                href={`/w/${workspaceId}/transactions`}
+                className="text-xs font-medium text-stone-600 underline-offset-2 hover:text-stone-900 hover:underline"
+              >
+                Browse all transactions →
+              </Link>
+            </div>
             <ul className="mt-2 divide-y divide-stone-200 overflow-hidden rounded-lg border border-stone-200 bg-white">
               {statements.map((statement) => {
                 const run = statement.reconciliations[0];

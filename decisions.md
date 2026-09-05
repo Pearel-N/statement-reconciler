@@ -264,3 +264,38 @@ Flags describe the present state — stale ones would send someone to re-check a
 row that has already been fixed. The reconciliation history is kept because
 watching the discrepancy shrink toward zero as corrections land is the
 feedback the review screen is built around.
+
+### Querying spans the workspace; verification never does
+
+Each statement proves itself against its own declared balances, and
+statements are never merged to do arithmetic — combining two would destroy the
+oracle, because there would no longer be declared balances bounding the rows.
+
+Querying is the opposite case. Twelve months of one account, or a bank
+statement beside a card statement, is exactly what someone wants to search
+across. That is not the multi-account aggregation this project cut: the cut
+was about *combining* accounts, and combining is still refused. On a bank
+statement a debit means money left the account; on a card statement it means a
+charge incurred. Adding them produces a number that means nothing, so no
+total spans statements.
+
+Results exclude unreconciled statements by default. A search returning forty
+rows, three of them from a statement that is off by ₹1,499, would be the same
+quiet lie the project exists to prevent. Including them is a deliberate
+toggle, and every such row is labelled.
+
+### Filters live in the URL
+
+The query form submits by GET, so every result set is a link — shareable,
+bookmarkable, correct under the back button — with no client state to keep in
+sync. It also matches how the rest of the app works: the URL is the thing you
+keep.
+
+### Search uses the 'simple' text configuration, not 'english'
+
+Statement descriptions are not prose. They are merchant names, payment rails
+and reference codes. English stemming folds distinct tokens together and
+English stop-word removal drops terms that carry meaning here. The tsvector is
+maintained by a database trigger rather than by application code, because
+extraction, corrections and any future backfill all write descriptions and
+each would otherwise have to remember.
