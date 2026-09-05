@@ -222,3 +222,45 @@ That is what makes the discrepancy shrink live as someone works, rather than
 after a wait and another API charge. It also means a bad extraction can be
 debugged, and the downstream code re-run against it, without paying to
 reproduce it.
+
+---
+
+## Day 4
+
+### Processing advances one stage per request
+
+Extraction takes longer than a serverless function is allowed to live, so the
+work cannot happen inside the upload request. `POST /api/statements/:id/process`
+does one stage and returns; the browser polls until it reports done.
+
+Three consequences, all of them the point rather than side effects.
+
+Every request finishes well inside the time limit, so nothing depends on a
+platform being generous. A crash loses only the stage that was running, and
+the next poll retries it rather than restarting from the file. And the
+`status` column becomes the actual machine — "Extracting transactions" is
+shown because the row genuinely is in `extracting`, so the progress a user
+watches is true rather than a spinner's guess.
+
+Reading the file is its own stage, before extraction, so a file that cannot be
+read costs nothing. Encrypted, corrupted and scanned documents are all refused
+before a single token is spent.
+
+### No lock, and that is a decision rather than an omission
+
+Two simultaneous calls would at worst repeat a stage. Parsing is pure.
+Extraction deletes the rows it wrote before writing again, so it cannot
+double a transaction list. Reconciliation appends a run, which is what it is
+designed to do. The cost of a collision is one wasted model call, not corrupt
+data, and one polling browser makes collisions unlikely.
+
+A queue is the right answer under real concurrency. It is not the right answer
+for five days, and pretending otherwise would have spent the budget on
+infrastructure rather than on the problem being judged.
+
+### Flags are replaced on each run; reconciliation runs are appended
+
+Flags describe the present state — stale ones would send someone to re-check a
+row that has already been fixed. The reconciliation history is kept because
+watching the discrepancy shrink toward zero as corrections land is the
+feedback the review screen is built around.

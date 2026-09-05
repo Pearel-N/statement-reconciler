@@ -14,19 +14,38 @@ import {
  * What the UI shows when a file is refused.
  *
  * Wider than the validation module's own code union on purpose: rejections
- * can also come from storage or the network, and those carry their own named
- * codes. Every one of them still arrives with a code and a human message —
- * that is the invariant, not the specific set of codes.
+ * can also come from storage, the network, or a processing stage, and those
+ * carry their own named codes. Every one of them still arrives with a code
+ * and a human message — that is the invariant, not the specific set of codes.
  */
 interface DisplayRejection {
   code: string;
   message: string;
 }
 
+/** The pipeline's own vocabulary, rendered for a person. */
+const STAGE_LABEL: Record<string, string> = {
+  uploaded: "Queued",
+  parsing: "Reading the file",
+  extracting: "Extracting transactions",
+  reconciling: "Checking the arithmetic",
+  verified: "Reconciles exactly",
+  needs_review: "Needs review",
+  failed: "Failed",
+};
+
 type ItemState =
   | { kind: "checking" }
   | { kind: "uploading" }
-  | { kind: "accepted"; statementId: string; note?: string }
+  | { kind: "processing"; stage: string }
+  | {
+      kind: "settled";
+      statementId: string;
+      status: string;
+      discrepancy?: string | null;
+      flagCount?: number;
+      detail?: string | null;
+    }
   | { kind: "rejected"; rejection: DisplayRejection };
 
 interface UploadItem {
@@ -41,24 +60,35 @@ function toRejection(payload: unknown): DisplayRejection {
   const error = (payload as { error?: { code?: string; message?: string } })?.error;
   return {
     code: error?.code ?? "unreadable_file",
-    message:
-      error?.message ?? "The server rejected this file but didn't say why.",
+    message: error?.message ?? "The server rejected this file but didn't say why.",
   };
 }
 
-const STATE_LABEL: Record<ItemState["kind"], string> = {
-  checking: "Checking",
-  uploading: "Uploading",
-  accepted: "Uploaded",
-  rejected: "Rejected",
-};
+function stateLabel(state: ItemState): string {
+  switch (state.kind) {
+    case "checking":
+      return "Checking";
+    case "uploading":
+      return "Uploading";
+    case "processing":
+      return STAGE_LABEL[state.stage] ?? state.stage;
+    case "settled":
+      return STAGE_LABEL[state.status] ?? state.status;
+    case "rejected":
+      return "Rejected";
+  }
+}
 
-const STATE_STYLE: Record<ItemState["kind"], string> = {
-  checking: "bg-stone-100 text-stone-600",
-  uploading: "bg-blue-50 text-blue-700",
-  accepted: "bg-emerald-50 text-emerald-700",
-  rejected: "bg-red-50 text-red-700",
-};
+function stateStyle(state: ItemState): string {
+  if (state.kind === "rejected") return "bg-red-50 text-red-700";
+  if (state.kind === "settled") {
+    if (state.status === "verified") return "bg-emerald-50 text-emerald-700";
+    if (state.status === "needs_review") return "bg-amber-50 text-amber-700";
+    return "bg-red-50 text-red-700";
+  }
+  if (state.kind === "processing") return "bg-blue-50 text-blue-700";
+  return "bg-stone-100 text-stone-600";
+}
 
 export function UploadPanel({ workspaceId }: { workspaceId: string }) {
   const [items, setItems] = useState<UploadItem[]>([]);
@@ -74,6 +104,57 @@ export function UploadPanel({ workspaceId }: { workspaceId: string }) {
       current.map((item) => (item.id === id ? { ...item, state } : item)),
     );
   }, []);
+
+  /**
+   * Drives one statement through the pipeline.
+   *
+   * Each call advances a single stage and returns, which is what keeps every
+   * request inside the serverless time limit. The stage names shown to the
+   * user are the statement's real status, not a guess — "Extracting
+   * transactions" appears because the row genuinely is mid-extraction.
+   */
+  const runPipeline = useCallback(
+    async (id: string, statementId: string) => {
+      // Generous, but finite: a pipeline that somehow never settles must stop
+      // rather than poll this workspace forever.
+      for (let attempt = 0; attempt < 60; attempt += 1) {
+        const response = await fetch(`/api/statements/${statementId}/process`, {
+          method: "POST",
+        });
+
+        const payload = await response.json();
+
+        if (!response.ok) {
+          patch(id, { kind: "rejected", rejection: toRejection(payload) });
+          return;
+        }
+
+        if (payload.done) {
+          patch(id, {
+            kind: "settled",
+            statementId,
+            status: payload.status,
+            discrepancy: payload.discrepancy ?? null,
+            flagCount: payload.flagCount,
+            detail: payload.errorDetail ?? null,
+          });
+          router.refresh();
+          return;
+        }
+
+        patch(id, { kind: "processing", stage: payload.status });
+      }
+
+      patch(id, {
+        kind: "rejected",
+        rejection: {
+          code: "processing_stalled",
+          message: "Processing didn't finish. Reload to see where it stopped.",
+        },
+      });
+    },
+    [patch, router],
+  );
 
   const process = useCallback(
     async (id: string, file: File) => {
@@ -153,20 +234,21 @@ export function UploadPanel({ workspaceId }: { workspaceId: string }) {
           return;
         }
 
-        patch(id, { kind: "accepted", statementId: confirmed.statementId });
+        patch(id, { kind: "processing", stage: "uploaded" });
         router.refresh();
+
+        await runPipeline(id, confirmed.statementId);
       } catch {
         patch(id, {
           kind: "rejected",
           rejection: {
             code: "network_error",
-            message:
-              "Couldn't reach the server. Check your connection and try again.",
+            message: "Couldn't reach the server. Check your connection and try again.",
           },
         });
       }
     },
-    [patch, router, workspaceId],
+    [patch, router, runPipeline, workspaceId],
   );
 
   const accept = useCallback(
@@ -193,9 +275,9 @@ export function UploadPanel({ workspaceId }: { workspaceId: string }) {
     [process],
   );
 
-  const accepted = items.filter((i) => i.state.kind === "accepted").length;
-  const rejected = items.filter((i) => i.state.kind === "rejected").length;
-  const settled = accepted + rejected;
+  const settled = items.filter(
+    (i) => i.state.kind === "settled" || i.state.kind === "rejected",
+  ).length;
 
   return (
     <section>
@@ -248,12 +330,11 @@ export function UploadPanel({ workspaceId }: { workspaceId: string }) {
         <div className="mt-6">
           <div className="flex items-baseline justify-between">
             <h2 className="text-xs font-medium uppercase tracking-wider text-stone-500">
-              Files
+              This upload
             </h2>
             {settled === items.length && items.length > 1 && (
               <p className="text-xs text-stone-500">
-                {accepted} accepted, {rejected} rejected — each file was
-                processed independently
+                each file was processed independently
               </p>
             )}
           </div>
@@ -271,10 +352,10 @@ export function UploadPanel({ workspaceId }: { workspaceId: string }) {
                   <span
                     className={[
                       "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
-                      STATE_STYLE[item.state.kind],
+                      stateStyle(item.state),
                     ].join(" ")}
                   >
-                    {STATE_LABEL[item.state.kind]}
+                    {stateLabel(item.state)}
                   </span>
                 </div>
 
@@ -287,22 +368,25 @@ export function UploadPanel({ workspaceId }: { workspaceId: string }) {
                   </p>
                 )}
 
-                {item.state.kind === "accepted" && item.state.note && (
-                  <p className="mt-1.5 text-xs leading-relaxed text-amber-700">
-                    {item.state.note}
-                  </p>
-                )}
+                {item.state.kind === "settled" &&
+                  item.state.status === "needs_review" && (
+                    <p className="mt-1.5 text-xs leading-relaxed text-amber-700">
+                      Off by {item.state.discrepancy}
+                      {typeof item.state.flagCount === "number" &&
+                        ` · ${item.state.flagCount} row${item.state.flagCount === 1 ? "" : "s"} to check`}
+                    </p>
+                  )}
+
+                {item.state.kind === "settled" &&
+                  item.state.status === "failed" &&
+                  item.state.detail && (
+                    <p className="mt-1.5 text-xs leading-relaxed text-red-700">
+                      {item.state.detail}
+                    </p>
+                  )}
               </li>
             ))}
           </ul>
-
-          <button
-            type="button"
-            onClick={() => setItems([])}
-            className="mt-3 text-xs font-medium text-stone-500 underline-offset-2 hover:text-stone-800 hover:underline"
-          >
-            Clear list
-          </button>
         </div>
       )}
     </section>

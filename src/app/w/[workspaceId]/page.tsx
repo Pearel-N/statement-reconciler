@@ -41,7 +41,17 @@ export default async function WorkspacePage({
       filename: true,
       fileBytes: true,
       status: true,
+      errorDetail: true,
+      bankName: true,
       createdAt: true,
+      _count: { select: { transactions: true, flags: true } },
+      // Most recent run only. The history exists so the discrepancy can be
+      // watched shrinking; the list only needs where it stands now.
+      reconciliations: {
+        orderBy: { runAt: "desc" },
+        take: 1,
+        select: { discrepancy: true, isReconciled: true },
+      },
     },
   });
 
@@ -84,33 +94,56 @@ export default async function WorkspacePage({
               Statements
             </h2>
             <ul className="mt-2 divide-y divide-stone-200 overflow-hidden rounded-lg border border-stone-200 bg-white">
-              {statements.map((statement) => (
-                <li
-                  key={statement.id}
-                  className="flex items-center gap-3 px-4 py-3"
-                >
-                  <span className="min-w-0 flex-1 truncate text-sm text-stone-800">
-                    {statement.filename}
-                  </span>
-                  <span className="shrink-0 font-mono text-xs text-stone-400">
-                    {formatBytes(statement.fileBytes)}
-                  </span>
-                  <span
-                    className={[
-                      "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
-                      STATUS_STYLE[statement.status] ??
-                        "bg-stone-100 text-stone-600",
-                    ].join(" ")}
-                  >
-                    {statement.status.replace("_", " ")}
-                  </span>
-                </li>
-              ))}
+              {statements.map((statement) => {
+                const run = statement.reconciliations[0];
+                return (
+                  <li key={statement.id} className="px-4 py-3">
+                    <div className="flex items-center gap-3">
+                      <span className="min-w-0 flex-1 truncate text-sm text-stone-800">
+                        {statement.filename}
+                      </span>
+                      <span className="shrink-0 font-mono text-xs text-stone-400">
+                        {formatBytes(statement.fileBytes)}
+                      </span>
+                      <span
+                        className={[
+                          "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                          STATUS_STYLE[statement.status] ??
+                            "bg-stone-100 text-stone-600",
+                        ].join(" ")}
+                      >
+                        {statement.status.replace("_", " ")}
+                      </span>
+                    </div>
+
+                    <p className="mt-1 text-xs text-stone-500">
+                      {statement.bankName ? `${statement.bankName} · ` : ""}
+                      {statement._count.transactions} transactions
+                      {run && !run.isReconciled && (
+                        <span className="text-amber-700">
+                          {" · off by "}
+                          {run.discrepancy.toString()}
+                          {statement._count.flags > 0 &&
+                            ` · ${statement._count.flags} flagged`}
+                        </span>
+                      )}
+                      {run?.isReconciled && (
+                        <span className="text-emerald-700">
+                          {" · reconciles exactly"}
+                        </span>
+                      )}
+                    </p>
+
+                    {statement.errorDetail && (
+                      <p className="mt-1 text-xs leading-relaxed text-red-700">
+                        {statement.errorDetail}
+                      </p>
+                    )}
+                  </li>
+                );
+              })}
             </ul>
-            <p className="mt-2 text-xs text-stone-500">
-              Stored and recorded. Parsing and extraction aren&apos;t built
-              yet, so everything stays at <code className="font-mono">uploaded</code>.
-            </p>
+
           </section>
         )}
 
