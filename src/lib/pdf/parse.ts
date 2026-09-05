@@ -137,6 +137,20 @@ export async function parsePdf(
   // browser globals that don't exist in a route handler.
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
+  // Point pdfjs at its worker with a resolvable specifier rather than letting
+  // it construct a path at runtime. A runtime-built path is invisible to a
+  // bundler's file tracing, which is how the worker came to be missing from
+  // the deployment while working locally.
+  try {
+    const { createRequire } = await import("node:module");
+    pdfjs.GlobalWorkerOptions.workerSrc = createRequire(import.meta.url).resolve(
+      "pdfjs-dist/legacy/build/pdf.worker.mjs",
+    );
+  } catch {
+    // Left to pdfjs's own resolution if that fails; the error surfaces below
+    // with its cause logged rather than silently.
+  }
+
   // Captured before parsing starts. pdfjs transfers the buffer to its worker,
   // which detaches it — reading these afterwards throws, which would turn
   // every named parse failure into an unhandled crash.
