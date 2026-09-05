@@ -321,3 +321,49 @@ the provenance record, drawn.
 The pdfjs worker is copied into `public/` on install rather than committed, so
 it can never drift out of step with the installed version, and so nothing is
 fetched from a CDN at runtime.
+
+---
+
+## Day 5 — two production-only failures
+
+Both worked perfectly on a laptop and failed on every upload in production.
+Neither was a logic error. Both were packaging.
+
+### The optional dependency that only existed on one operating system
+
+pdfjs needs `@napi-rs/canvas` to polyfill `DOMMatrix` under Node, and declares
+it as an *optional* dependency. Optional dependencies resolve per platform, so
+installing on macOS wrote the macOS binary into `package-lock.json` and
+nothing for Linux. Production had no binary to load.
+
+Fixed by depending on it directly and rebuilding the lockfile, which records
+every platform's binary. The general lesson is that a lockfile is a record of
+one machine's resolution, and an optional dependency is where that leaks.
+
+### The worker that file tracing could not see
+
+pdfjs loads its worker by constructing a path at runtime. A bundler's file
+tracing follows static references, so it never saw the reference and left the
+worker out of the deployment. Every PDF then failed with *"Setting up fake
+worker failed"* — a message that points at pdfjs rather than at the packaging,
+which is what made it slow to find.
+
+Fixed by resolving the worker through a static specifier and naming the files
+in `outputFileTracingIncludes`.
+
+### What actually made both of these findable
+
+The parse failure handler originally swallowed its cause and returned only the
+user-facing message. Adding a server-side log of the underlying error — with
+the byte count and the file's first eight bytes alongside it — turned an
+unfalsifiable "it doesn't work" into `header: '%PDF-1.4'`, which ruled out
+storage and the file in one line and left only the packaging.
+
+That logging then had a bug of its own: pdfjs transfers the buffer to its
+worker, detaching it, so reading the header afterwards threw and turned every
+named parse failure into an unhandled crash. A test caught it, on the path
+that only runs when something else has already gone wrong.
+
+The wider point, and the reason deploying on day one was worth it: these are
+not bugs a laptop can find. Only production has the other operating system and
+the other bundler.
