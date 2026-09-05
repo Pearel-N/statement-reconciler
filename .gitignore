@@ -50,3 +50,6 @@ tsconfig.tsbuildinfo
 
 # cached model output, dev only
 /.extraction-cache
+
+# copied from pdfjs on install
+/public/pdf.worker.min.mjs

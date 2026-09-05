@@ -299,3 +299,25 @@ English stop-word removal drops terms that carry meaning here. The tsvector is
 maintained by a database trigger rather than by application code, because
 extraction, corrections and any future backfill all write descriptions and
 each would otherwise have to remember.
+
+### The source page is rendered in the browser
+
+A flagged row is a claim about a document. Showing the document, with the
+exact strip the value was read from outlined, turns checking it from "open the
+PDF and hunt for the row" into a glance — which is the difference between a
+review screen someone uses and one they work around.
+
+Rendering happens client-side. The alternative is a canvas implementation
+inside a serverless function rasterising a page per request, to produce
+something the browser can draw itself from a file it is already permitted to
+fetch. The bucket stays private throughout: the browser is handed a signed
+link that expires in five minutes, for one file, scoped to a workspace whose
+id it already had.
+
+The rectangle is not a guess. It is the bounding box of the positioned
+fragments on the exact line the model cited — the same lookup that produced
+the provenance record, drawn.
+
+The pdfjs worker is copied into `public/` on install rather than committed, so
+it can never drift out of step with the installed version, and so nothing is
+fetched from a CDN at runtime.

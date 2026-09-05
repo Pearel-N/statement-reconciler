@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 
 import { formatMoney } from "@/lib/money";
+import { SourceView, type SourceBox } from "@/components/source-view";
 
 /**
  * The review screen.
@@ -33,6 +34,7 @@ export interface ReviewRow {
   runningBalance: string | null;
   isCorrected: boolean;
   sourcePage: number | null;
+  sourceBbox: SourceBox | null;
   flags: ReviewFlag[];
 }
 
@@ -49,11 +51,15 @@ export function ReviewPanel({
   currency,
   statementFlags,
   initial,
+  statementId,
+  workspaceId,
 }: {
   rows: ReviewRow[];
   currency: string | null;
   statementFlags: ReviewFlag[];
   initial: Verdict;
+  statementId: string;
+  workspaceId: string;
 }) {
   const [rows, setRows] = useState(initialRows);
   const [verdict, setVerdict] = useState(initial);
@@ -139,6 +145,8 @@ export function ReviewPanel({
                 currency={currency}
                 saving={saving === row.id}
                 onSave={save}
+                statementId={statementId}
+                workspaceId={workspaceId}
               />
             ))}
           </div>
@@ -272,11 +280,15 @@ function RowEditor({
   currency,
   saving,
   onSave,
+  statementId,
+  workspaceId,
 }: {
   row: ReviewRow;
   currency: string | null;
   saving: boolean;
   onSave: (id: string, changes: Partial<ReviewRow>) => void;
+  statementId: string;
+  workspaceId: string;
 }) {
   const [amount, setAmount] = useState(row.amount);
   const [direction, setDirection] = useState(row.direction);
@@ -296,7 +308,8 @@ function RowEditor({
         ))}
       </div>
 
-      <div className="px-4 py-3">
+      <div className="grid gap-4 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.15fr)]">
+        <div>
         <p className="text-xs text-stone-500">
           Row {row.rowIndex}
           {row.sourcePage !== null && ` · page ${row.sourcePage}`}
@@ -345,6 +358,16 @@ function RowEditor({
             currently {formatMoney(row.amount, currency)} {row.direction}
           </span>
         </div>
+        </div>
+
+        {row.sourcePage !== null && row.sourceBbox !== null && (
+          <SourceView
+            statementId={statementId}
+            workspaceId={workspaceId}
+            page={row.sourcePage}
+            box={row.sourceBbox}
+          />
+        )}
       </div>
     </div>
   );

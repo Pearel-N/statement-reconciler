@@ -53,6 +53,7 @@ export default async function StatementPage({
     runningBalance: row.runningBalance?.toString() ?? null,
     isCorrected: row.isCorrected,
     sourcePage: row.sourcePage,
+    sourceBbox: (row.sourceBbox ?? null) as ReviewRow["sourceBbox"],
     flags: (flagsByTransaction.get(row.id) ?? []).map((flag) => ({
       flagType: flag.flagType,
       severity: flag.severity,
@@ -146,6 +147,8 @@ export default async function StatementPage({
               severity: flag.severity,
               detail: flag.detail,
             }))}
+            statementId={statement.id}
+            workspaceId={workspaceId}
             initial={{
               isReconciled: run?.isReconciled ?? false,
               discrepancy: run?.discrepancy.toString() ?? null,

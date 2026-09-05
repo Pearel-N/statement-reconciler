@@ -167,6 +167,12 @@ model Transaction {
   @@unique([statementId, rowIndex])
   @@index([statementId, date])
   @@index([statementId, amount])
+  /// Workspace-wide queries filter statements first, then sort by date;
+  /// the composite index above only serves the per-statement path.
+  @@index([date])
+  /// Declared here so Prisma sees no drift against the raw migration that
+  /// creates it alongside the trigger keeping the column current.
+  @@index([searchVector(ops: raw("tsvector_ops"))], type: Gin)
   @@map("transactions")
 }
 
