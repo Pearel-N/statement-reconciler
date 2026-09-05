@@ -1,101 +1,134 @@
 # Decisions
 
-Written as the work happens, not reconstructed at the end. Each entry is a
-choice that had a real alternative, and why this side was picked.
+Written as the work happened, not reconstructed at the end.
+
+Each entry is a choice that had a real alternative. What we did, why, and what
+we turned down. Kept short on purpose.
 
 ---
 
 ## Day 1
 
-### Deploy before there is anything to deploy
+### Deploy on day one, with nothing to deploy
 
-The pipeline (repo → CI → hosted URL) is proven while the app is empty and
-nothing is at stake. Environment, connection pooling and storage permissions
-are the three things that bite late in a project, so they get to bite on day
-one instead. From then on production is never more than a few hours behind
-local, and day 5 is tests and docs rather than a first-ever deploy.
+We pushed an empty app to production before writing a feature.
 
-### Money is `Decimal`, never a float
+Environment variables, database pooling and storage permissions are the three
+things that break late in a project. Deploying early means they break on day
+one, when nothing is at stake.
 
-Postgres `numeric`, Prisma `Decimal`. Reconciliation arithmetic uses
-`Decimal.js` methods, never `+` or `-`. An app whose entire claim is
-"the arithmetic proves the extraction" cannot afford `0.1 + 0.2`.
+It paid off. Two bugs only appear in production, and we found them with time
+to spare. They're at the bottom of this file.
 
-### `direction` is its own column, not the sign of `amount`
+### Money is a Decimal, never a float
 
-Two reasons. Filtering by debit/credit stays a plain equality check instead of
-a sign predicate. And reconciliation arithmetic reads as what it is —
-`credits.minus(debits)` — rather than a sum whose correctness depends on every
-row having been signed correctly at extraction time. Sign-encoding pushes a
-correctness assumption into the extractor, which is the component least
-trusted here.
+In a browser console, `0.1 + 0.2` gives `0.30000000000000004`.
+
+Computers store decimals in binary, and some decimals have no exact binary
+form. Small errors creep in and add up. Over a hundred rows that is enough to
+make a statement that balances look like it doesn't.
+
+So money is `Decimal` everywhere — Postgres `numeric` in the database,
+`decimal.js` in code. We write `a.plus(b)`, never `a + b`.
+
+A test adds `0.1` ten times and demands exactly `1`. It exists so that
+swapping in a plain number breaks the build.
+
+### Debit or credit is its own column
+
+The shortcut is to store a debit as `-1500` and a credit as `+2000`. One
+column instead of two.
+
+We didn't. Amounts are always positive, and a separate column says which
+direction the money went.
+
+The reason: a minus sign would have to be applied by the extractor — the part
+reading the PDF, which is the part we trust least. One wrong sign and the
+arithmetic is wrong with nothing to catch it.
+
+Keeping direction separate means the flip happens in one small function we
+control and test.
+
+We gave up simpler summing and slightly easier filtering. Worth it.
 
 ### Provenance columns exist in the first migration
 
-`source_page` and `source_bbox` are on `transactions` before anything writes
-to them. Retrofitting provenance after the extractor is built means changing
-the extractor's output contract, its tests, and a migration, all at once, on
-the day the review UI is due.
+`source_page` and `source_bbox` were in the database before anything wrote to
+them.
 
-### Bounding boxes are derived in code, not asked of the model
+Adding them later would mean changing the extractor's output, its tests and
+the database schema all at once — on the day the review screen was due.
 
-A model handed plain text cannot know where on the page that text was; any
-coordinates it returns are invented. So the PDF is parsed with positioned text
-extraction (per-item transform, width, height), the model receives text, and
-each returned row is matched back to its source text items to *derive* a
-bounding box. Provenance is therefore computed, not generated — which is the
-same principle as the reconciliation oracle itself, applied to layout.
+### Bounding boxes are worked out in code, not asked of the model
 
-Fallback if row-to-item matching proves unreliable on some layouts: page
-number plus the matched text span, highlighted by re-finding the string. Still
-honest provenance, and it degrades visibly rather than silently.
+Give a model plain text and it has no idea where that text sat on the page.
+Any coordinates it offered would be invented.
 
-### No auth; the workspace ID in the URL is the key
+So the PDF is read with positions kept, the model gets text, and each row it
+returns is matched back to the fragments it came from. Provenance is
+calculated, not generated.
+
+Which is the same principle as the reconciliation itself, applied to layout.
+
+### No login. The URL is the key
+
+Landing on the app creates a workspace and puts a random ID in the address
+bar. That address is the only way back.
 
 Five scored days, and access control demonstrates nothing this project is
-being judged on. Workspace IDs are 122-bit random UUIDs generated server-side
-with `crypto.randomUUID()` — unguessable, and no dependency needed. There is
-no endpoint that lists or enumerates workspaces.
+being judged on. The IDs are 122 bits of randomness, so they can't be guessed,
+and nothing in the app lists them.
 
-This is a deliberate trade, not an oversight: once workspaces have real users,
-auth is exactly where access control belongs.
+The cost is real and we say it out loud: lose the link and you lose the
+workspace. Anyone you send it to has access forever, and there's no way to
+take it back.
 
-### Validation runs twice, and only the second one counts
+That's fine for a demo and not fine for real financial data. Which is exactly
+why authentication is the first thing after this.
 
-The browser checks size, extension and the file's leading bytes so a wrong
-file is rejected instantly with a specific reason, before anything is
-uploaded. The route handler runs the same checks again, from the same pure
-module in `src/lib/upload-validation.ts`. A client-side check is a courtesy to
-the user; it is not a control, and treating it as one is how size limits get
-bypassed.
+### The same checks run twice, and only the second one counts
 
-### The extension is a claim; the first five bytes are a fact
+The browser checks a file's size, name and leading bytes so the user gets an
+instant answer. The server runs the identical functions again.
 
-`report.pdf` is frequently a renamed `.docx`, and a MIME type is whatever the
-browser guessed. Reading the leading `%PDF-` turns "failed somewhere in the
-parser" into "this file isn't a PDF" at the moment of selection, for the cost
-of five bytes.
+That isn't distrust of the user. Anything in a browser can be bypassed — we
+proved it with a `curl` command that the server correctly rejected.
 
-### Uploads in a batch are independent, and the UI proves it
+The browser check is a courtesy. The server check is the control.
 
-Files are processed with `Promise.allSettled`, not sequentially and not with a
-short-circuit on first failure. Drop three valid statements and one garbage
-file and you get three accepted and one specifically-rejected — visible in the
-summary line rather than asserted in a README.
+Both call the same module, so they can't drift apart.
 
-### Unconfigured storage says so instead of pretending
+### The extension is a claim. The first five bytes are a fact
 
-Until the Supabase environment variables are present, the upload route returns
-`upload.mode: "unconfigured"` and the UI shows "checked but not saved" on the
-row. The alternative — a success state for a file that went nowhere — is the
-exact class of quiet lie this project exists to eliminate. The client branch
-for the real signed-URL response is already written next to it.
+`report.pdf` is often a renamed `.docx`, and the file type the browser reports
+is just a guess.
+
+Every real PDF starts with the characters `%PDF-`. Reading five bytes turns
+"failed somewhere in the parser" into "this isn't a PDF" at the moment of
+selection.
+
+### Files in a batch are processed independently, and the screen shows it
+
+Uploads run in parallel and none of them can stop another.
+
+Drop three good statements and one junk file and you get three accepted and
+one specifically rejected, with a summary line saying so.
+
+We wanted that visible on screen rather than claimed in a README.
+
+### An unfinished feature says so
+
+Before storage was wired up, the upload route replied "not configured" and the
+screen showed "checked, but not saved".
+
+The alternative was a green tick for a file that went nowhere. In an app built
+on knowing when it's wrong, that's the worst possible thing to ship.
 
 ### Light theme only
 
-A desktop tool for finance ops. A deliberate light theme reads better than a
-half-finished dark one, and `color-scheme: light` is set explicitly so the
-browser doesn't invent one.
+This is a desktop tool for finance work. A deliberate light theme reads better
+than a half-finished dark one, and we set it explicitly so the browser doesn't
+invent one.
 
 ---
 
@@ -103,267 +136,292 @@ browser doesn't invent one.
 
 ### The reconciliation engine was built before the extractor
 
-It is pure functions over a typed shape — no PDF, no database, no model, no
-React — so it can be proven correct while extraction doesn't exist yet.
-Building continuity handling first would have meant debugging two unproven
-layers against each other. Extraction now only has to produce a shape that is
-already known to reconcile.
+It's pure functions — no PDF, no database, no model, no React. So it could be
+proven correct while extraction didn't exist yet.
 
-For the same reason the engine depends on `decimal.js` directly rather than on
-Prisma's re-export of it. Nothing in `src/lib/reconcile.ts` knows the database
-exists.
+Building the harder page-handling logic first would have meant debugging two
+unproven layers against each other.
 
-### Each running-balance check re-anchors on the printed balance
+For the same reason it depends on `decimal.js` directly rather than on
+Prisma's version of it. Nothing in the engine knows a database exists.
 
-The obvious implementation accumulates a running total and compares it to each
-row. It is also useless: if row 40's amount is misread, every row after it
-fails too, and the app tells a human "100 rows are wrong."
+### Each balance check restarts from the printed balance
 
-Instead each check starts from the *document's* previous printed balance. Row
-41 is checked against row 40's printed balance, which is correct regardless of
-what was misread on row 40 — so exactly one row fails, and the human is
-pointed at exactly one row. Rows with no printed balance carry the last anchor
-forward and accumulate onto it, so gaps in that column reduce the precision of
-localisation instead of breaking it.
+This is the most important decision in the project.
 
-That single choice is the difference between "the statement doesn't add up"
-and "row 40 is wrong, by 1,800."
+Most statements print a balance after every row. The obvious approach is to
+keep your own running total and compare it to each one.
+
+That approach is useless. If row 40 is misread, your total is wrong from then
+on, so rows 41 through 140 all fail too. The app tells a human that a hundred
+rows are wrong — no better than saying the statement doesn't add up.
+
+What we do instead: after each row, throw away our number and start again from
+the balance the document itself printed.
+
+Row 41 is checked against row 40's printed balance, which is correct no matter
+what we misread on row 40. So exactly one row fails, and the size of the gap
+is exactly the amount that was wrong.
+
+That is the difference between "this statement doesn't add up" and "row 40 is
+wrong, by ₹1,800".
+
+It finds missing rows too. If a row vanished, the next row's check fails by
+exactly the missing amount.
 
 ### Prisma 6, not Prisma 7
 
-Prisma 7 moves the connection URL out of the schema into a config file and
-requires a driver adapter at runtime — two more moving parts — and has known
-friction with Next.js 16's Turbopack, which is this project's stack.
+Prisma 7 moves the connection settings into a separate file, needs an extra
+database adapter at runtime, and has known problems with Next.js 16.
 
-Prisma 6 supports Supabase's two-URL setup (pooled for queries, direct for
-migrations) directly in the schema, and is the version most of the ecosystem
-is currently running against.
+It would give this project nothing it uses.
 
-The risk budget for five days belongs to extraction and reconciliation. The
-ORM is not the interesting problem here, so it gets the boring, stable choice.
+The general rule, which is the real answer: adopt a new major version when it
+gives you something you need. "It's newer" isn't a reason.
 
-### The database row is created after the bytes land, not before
+We had five days, and the interesting problem was extraction — not the
+database library.
 
-Registering an upload writes nothing. If a row were created up front and the
-upload then failed — network drop, closed tab — the row would sit there
-claiming a file exists that doesn't, and every later stage would have to
-defend against it.
+### The database row is written after the file arrives, not before
 
-So `/api/statements` only issues a signed URL, and `/api/statements/confirm`
-creates the row. Confirm doesn't take the browser's word either: it asks
-storage whether the object exists and records storage's byte count, not the
-one the browser claimed. It also refuses any storage path outside the
-requesting workspace's own prefix, so a crafted request can't attach someone
-else's file to a workspace.
+Asking for an upload slot writes nothing.
 
-### Localisation reports one flag per break, and stays silent when unsure
+If a row were created first and the upload then failed, the row would sit
+there claiming a file exists that doesn't. Everything downstream would have to
+defend against that.
 
-Two rules govern what the review screen is allowed to say.
+So a second call creates the row, and only after the server asks storage
+whether the bytes really landed. The server records storage's byte count, not
+the browser's, and refuses any file path outside the workspace asking for it.
 
-One flag per break, with no merging of consecutive breaks. Merging made sense
-against an accumulating walk, where a single misread row produced a cascade of
-identical gaps. Re-anchoring removed the cascade, so two breaks are now two
-genuinely separate problems and grouping them would hide real errors.
+### One flag per problem, and silence when unsure
 
-And residual explanations only fire on a unique match. If two rows equally
-explain a discrepancy, the arithmetic cannot say which is wrong, and naming
-both would send a human to re-read a correct row as often as an incorrect one.
-Ranking the candidates and showing the best guess would look more capable and
-be strictly worse: to the user a ranked guess is indistinguishable from a
-proven answer. In an app whose claim is knowing when it is wrong, a confident
-wrong explanation costs more than silence.
+Two rules about what the review screen is allowed to say.
+
+**One flag per break.** We don't merge nearby breaks. Merging made sense
+against the naive walk, where one bad row caused a cascade. Restarting from
+the printed balance removed the cascade, so two breaks are now two real
+problems.
+
+**Silence when more than one answer fits.** If two rows equally explain a
+discrepancy, the app says nothing.
+
+Ranking them and showing the best guess would look cleverer and be worse. On
+screen, a guess looks exactly like a proof. And a user sent to re-read a
+correct row stops trusting every flag afterwards.
 
 ---
 
 ## Day 3
 
-### The PDF is parsed once, for two different consumers
+### The PDF is read once, for two different purposes
 
-The model needs text it can read as a table: rows in order, columns aligned,
-empty cells still visibly empty. Debit and credit are distinguished by *where*
-a number sits, so any representation that collapses horizontal position
-destroys the difference between money in and money out — which is precisely
-the field the reconciliation arithmetic depends on.
+A PDF doesn't store rows and columns. It stores fragments of text, each with a
+position. Tables are an illusion made by where things sit.
 
-Provenance needs the opposite: exact coordinates for every fragment, so a row
-the model returns can be traced back to a region of the page.
+The model needs text it can read as a table — columns lined up, empty cells
+still visibly empty. Which column a number sits in is what decides whether
+it's money in or money out.
 
-`parsePdf` produces both from one pass. `items` keeps raw positioned
-fragments; `layout` renders each line as fixed-width text, padding to the
-column each fragment's x position implies. Padding rather than joining is the
-point: a row with an empty debit column produces no fragment there at all, and
-joining with single spaces would silently close the gap and make a credit read
-as a debit.
+Provenance needs the opposite: exact coordinates, so a row can be traced back
+to a region of the page.
 
-### Coordinates are computed, never requested from the model
+One pass produces both. Raw positions are kept, and each line is also rendered
+as fixed-width text, padded to the column each fragment's position implies.
 
-A model handed plain text cannot know where on the page that text was. Any
-coordinates it returned would be invented, and invented provenance in an app
-built on verified correctness is worse than none. So the parser records
-positions and the model is asked only for values.
+The padding is the point. On a credit row there is nothing at all in the debit
+column — no fragment, not even an empty string. Joining fragments with spaces
+would close the gap and make a credit read as a debit.
 
-PDF measures from the bottom-left; this converts to top-left once, at the
-boundary, so nothing downstream has to remember which way up the page is.
+### The model is never asked where anything is
+
+It's asked which numbered line it read a row from.
+
+We already know where that line sits, because the parser recorded it. So the
+highlight is looked up, not generated.
+
+PDFs measure from the bottom-left of the page. We convert to top-left once, at
+the edge of the system, so nothing after that has to remember which way up the
+page is.
 
 ### "No text layer" is a threshold, not a zero check
 
-A scanned page often carries a stray character from a header stamp or a
-watermark. Refusing only on exactly zero characters would let those through
-into extraction, where the model would hallucinate a statement out of nothing.
+Scanned pages often carry a stray character from a watermark or a stamp.
+
+Refusing only on exactly zero characters would let those through to
+extraction, where the model would invent a statement out of nothing.
+
 Forty characters across the whole document is the line.
 
-### The stored model output is what corrections replay against
+### Corrections replay the stored answer, never a new model call
 
-`statements.raw_extraction` holds the model's unedited answer. Re-running
-reconciliation after a human corrects a row must never call the model again —
-it replays that stored output with the correction applied.
+`raw_extraction` holds the model's unedited output.
 
-That is what makes the discrepancy shrink live as someone works, rather than
-after a wait and another API charge. It also means a bad extraction can be
-debugged, and the downstream code re-run against it, without paying to
-reproduce it.
+When someone fixes a row, reconciliation re-runs from the stored rows. No
+second model call, no charge, no wait.
+
+That's what lets the discrepancy shrink while a person works. It also means a
+bad extraction can be debugged later without paying to reproduce it.
 
 ---
 
 ## Day 4
 
-### Processing advances one stage per request
+### Processing moves one step per request
 
-Extraction takes longer than a serverless function is allowed to live, so the
-work cannot happen inside the upload request. `POST /api/statements/:id/process`
-does one stage and returns; the browser polls until it reports done.
+Extraction takes longer than a serverless function is allowed to live, so it
+can't happen inside the upload request.
 
-Three consequences, all of them the point rather than side effects.
+Instead, one endpoint does a single step and returns. The browser calls it
+again and again until it reports finished.
 
-Every request finishes well inside the time limit, so nothing depends on a
-platform being generous. A crash loses only the stage that was running, and
-the next poll retries it rather than restarting from the file. And the
-`status` column becomes the actual machine — "Extracting transactions" is
-shown because the row genuinely is in `extracting`, so the progress a user
-watches is true rather than a spinner's guess.
+Three things follow. Every request finishes well inside the time limit. A
+crash loses only the step that was running, and the next call retries it. And
+the status column becomes the real state machine, so "Extracting transactions"
+appears because the row genuinely is extracting — not because a spinner is
+guessing.
 
-Reading the file is its own stage, before extraction, so a file that cannot be
-read costs nothing. Encrypted, corrupted and scanned documents are all refused
+Reading the file is its own step, before extraction. So a file that can't be
+read costs nothing. Encrypted, corrupt and scanned files are all refused
 before a single token is spent.
 
-### No lock, and that is a decision rather than an omission
+### There is no lock, and that's deliberate
 
-Two simultaneous calls would at worst repeat a stage. Parsing is pure.
-Extraction deletes the rows it wrote before writing again, so it cannot
-double a transaction list. Reconciliation appends a run, which is what it is
-designed to do. The cost of a collision is one wasted model call, not corrupt
-data, and one polling browser makes collisions unlikely.
+Two calls arriving at once would at worst repeat a step.
 
-A queue is the right answer under real concurrency. It is not the right answer
-for five days, and pretending otherwise would have spent the budget on
-infrastructure rather than on the problem being judged.
+Reading the file changes nothing. Extraction deletes its own rows before
+writing again, so it can't double anything. Reconciliation adds a new run,
+which is what it's meant to do.
 
-### Flags are replaced on each run; reconciliation runs are appended
+So a collision costs one wasted model call, not corrupt data. And one browser
+polling makes collisions unlikely anyway.
 
-Flags describe the present state — stale ones would send someone to re-check a
-row that has already been fixed. The reconciliation history is kept because
-watching the discrepancy shrink toward zero as corrections land is the
-feedback the review screen is built around.
+A proper queue is the right answer with real concurrency. It's the wrong
+answer for a five-day build, and pretending otherwise would have spent the
+time on infrastructure instead of the problem being judged.
 
-### Querying spans the workspace; verification never does
+### Flags are replaced; reconciliation runs are kept
 
-Each statement proves itself against its own declared balances, and
-statements are never merged to do arithmetic — combining two would destroy the
-oracle, because there would no longer be declared balances bounding the rows.
+Flags describe how things stand now. A stale one would send someone to
+re-check a row they already fixed.
 
-Querying is the opposite case. Twelve months of one account, or a bank
-statement beside a card statement, is exactly what someone wants to search
-across. That is not the multi-account aggregation this project cut: the cut
-was about *combining* accounts, and combining is still refused. On a bank
-statement a debit means money left the account; on a card statement it means a
-charge incurred. Adding them produces a number that means nothing, so no
-total spans statements.
+The history of reconciliation runs is kept, because watching the discrepancy
+shrink toward zero is the feedback the review screen is built around.
 
-Results exclude unreconciled statements by default. A search returning forty
-rows, three of them from a statement that is off by ₹1,499, would be the same
-quiet lie the project exists to prevent. Including them is a deliberate
-toggle, and every such row is labelled.
+### Search spans the workspace. Verification never does
+
+Each statement proves itself against its own declared balances. Statements are
+never merged to do arithmetic — combining two would destroy the proof, because
+there'd be no declared balances bounding the rows.
+
+Searching is the opposite case. Twelve months of one account, or a bank
+statement beside a card statement, is exactly what someone wants to look
+across.
+
+That isn't the multi-account aggregation we cut. That cut was about
+*combining* accounts, and combining is still refused. On a bank statement a
+debit means money left the account. On a card statement it means a charge you
+now owe. Adding them gives a number that means nothing.
+
+Rows from statements that don't reconcile are hidden by default. A search
+returning forty rows, three from a statement that's off by ₹1,499, would be
+the same quiet lie this project exists to prevent. Including them is a
+deliberate toggle, and every such row is labelled.
 
 ### Filters live in the URL
 
-The query form submits by GET, so every result set is a link — shareable,
-bookmarkable, correct under the back button — with no client state to keep in
-sync. It also matches how the rest of the app works: the URL is the thing you
-keep.
+The search form submits by GET, so every result set is a link — shareable,
+bookmarkable, and correct under the back button. No client state to keep in
+sync.
 
-### Search uses the 'simple' text configuration, not 'english'
+It also matches how the rest of the app works. The URL is the thing you keep.
 
-Statement descriptions are not prose. They are merchant names, payment rails
-and reference codes. English stemming folds distinct tokens together and
-English stop-word removal drops terms that carry meaning here. The tsvector is
-maintained by a database trigger rather than by application code, because
-extraction, corrections and any future backfill all write descriptions and
-each would otherwise have to remember.
+### Search treats descriptions as codes, not prose
 
-### The source page is rendered in the browser
+Postgres's default English text search stems words and drops stop-words. That
+suits prose. Statement descriptions are merchant names, payment rails and
+reference numbers.
+
+Worse, Postgres's parser recognises structured tokens. It read
+`UPI/DR/741520749048/Lumen Broadband/NWBK` as file paths and indexed
+`Broadband/NWBK` as one token — so searching `broadband` found nothing.
+
+We flatten every separator to a space before indexing, and do the same to the
+search text. A database trigger keeps the index current, because extraction,
+corrections and any future backfill all write descriptions and each would
+otherwise have to remember.
+
+Worth noting how this was found: the default setup looked like it worked. It
+only failed on the one kind of text this app actually stores, and it took
+someone typing a word a real user would type.
+
+### The source page is drawn in the browser
 
 A flagged row is a claim about a document. Showing the document, with the
-exact strip the value was read from outlined, turns checking it from "open the
-PDF and hunt for the row" into a glance — which is the difference between a
-review screen someone uses and one they work around.
+exact line outlined, turns checking it from "open the PDF and hunt" into a
+glance.
 
-Rendering happens client-side. The alternative is a canvas implementation
-inside a serverless function rasterising a page per request, to produce
-something the browser can draw itself from a file it is already permitted to
-fetch. The bucket stays private throughout: the browser is handed a signed
-link that expires in five minutes, for one file, scoped to a workspace whose
-id it already had.
+Rendering happens in the browser. The alternative is a serverless function
+rasterising a page per request, to produce something the browser can draw
+itself from a file it's already allowed to fetch.
 
-The rectangle is not a guess. It is the bounding box of the positioned
-fragments on the exact line the model cited — the same lookup that produced
-the provenance record, drawn.
+The bucket stays private throughout. The browser gets a link that expires in
+five minutes, for one file, in a workspace it already had the ID for.
 
-The pdfjs worker is copied into `public/` on install rather than committed, so
-it can never drift out of step with the installed version, and so nothing is
-fetched from a CDN at runtime.
+The rectangle is not a guess. It's the box around the fragments on the exact
+line the model cited.
 
 ---
 
-## Day 5 — two production-only failures
+## Day 5 — two failures that only happen in production
 
 Both worked perfectly on a laptop and failed on every upload in production.
-Neither was a logic error. Both were packaging.
+Neither was a logic error. Both were about which files get packaged.
 
-### The optional dependency that only existed on one operating system
+### An optional dependency that only existed for one operating system
 
-pdfjs needs `@napi-rs/canvas` to polyfill `DOMMatrix` under Node, and declares
-it as an *optional* dependency. Optional dependencies resolve per platform, so
-installing on macOS wrote the macOS binary into `package-lock.json` and
-nothing for Linux. Production had no binary to load.
+pdfjs needs a package called `@napi-rs/canvas` to work under Node, and lists
+it as *optional*.
+
+Optional dependencies are resolved per operating system. Installing on a Mac
+wrote the Mac binary into `package-lock.json` and nothing for Linux. So
+production had nothing to load.
 
 Fixed by depending on it directly and rebuilding the lockfile, which records
-every platform's binary. The general lesson is that a lockfile is a record of
-one machine's resolution, and an optional dependency is where that leaks.
+every platform's binary.
 
-### The worker that file tracing could not see
+The lesson: a lockfile is a record of one machine's install, and optional
+dependencies are where that leaks.
 
-pdfjs loads its worker by constructing a path at runtime. A bundler's file
-tracing follows static references, so it never saw the reference and left the
-worker out of the deployment. Every PDF then failed with *"Setting up fake
-worker failed"* — a message that points at pdfjs rather than at the packaging,
-which is what made it slow to find.
+### A worker file the bundler couldn't see
 
-Fixed by resolving the worker through a static specifier and naming the files
-in `outputFileTracingIncludes`.
+pdfjs loads its worker by building a file path at runtime.
 
-### What actually made both of these findable
+Bundlers work out what to ship by following references in the code. A path
+built at runtime isn't a reference it can follow, so the worker was left out
+of the deployment.
 
-The parse failure handler originally swallowed its cause and returned only the
-user-facing message. Adding a server-side log of the underlying error — with
-the byte count and the file's first eight bytes alongside it — turned an
-unfalsifiable "it doesn't work" into `header: '%PDF-1.4'`, which ruled out
-storage and the file in one line and left only the packaging.
+Every PDF then failed with "Setting up fake worker failed" — a message that
+points at pdfjs rather than at packaging, which is what made it slow to find.
 
-That logging then had a bug of its own: pdfjs transfers the buffer to its
-worker, detaching it, so reading the header afterwards threw and turned every
-named parse failure into an unhandled crash. A test caught it, on the path
-that only runs when something else has already gone wrong.
+Fixed by resolving the worker through a static path and naming the files
+explicitly for the bundler.
 
-The wider point, and the reason deploying on day one was worth it: these are
-not bugs a laptop can find. Only production has the other operating system and
-the other bundler.
+### What made both of them findable
+
+The parse failure handler was returning a clean message to the user and
+throwing the cause away.
+
+Adding a server-side log of the real error — with the byte count and the
+file's first eight bytes beside it — turned "it doesn't work" into
+`header: '%PDF-1.4'`, 55,953 bytes. That killed two theories in one line. The
+file had arrived intact and storage was fine, which left only packaging.
+
+That logging then had a bug of its own. pdfjs hands the file buffer to its
+worker, which empties it, so reading the header afterwards crashed — turning
+every named parse failure into an unhandled error. A test caught it, on the
+path that only runs when something else has already gone wrong.
+
+The wider point, and the reason deploying on day one was worth it: a laptop
+cannot find these. Only production has the other operating system and the
+other bundler.
