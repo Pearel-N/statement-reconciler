@@ -137,6 +137,12 @@ export async function parsePdf(
   // browser globals that don't exist in a route handler.
   const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
 
+  // Captured before parsing starts. pdfjs transfers the buffer to its worker,
+  // which detaches it — reading these afterwards throws, which would turn
+  // every named parse failure into an unhandled crash.
+  const byteLength = data.byteLength;
+  const header = new TextDecoder().decode(data.subarray(0, 8));
+
   let doc;
   const task = pdfjs.getDocument({
     data,
@@ -160,8 +166,8 @@ export async function parsePdf(
       name,
       code,
       message: (error as Error)?.message,
-      bytes: data.byteLength,
-      header: new TextDecoder().decode(data.subarray(0, 8)),
+      bytes: byteLength,
+      header,
     });
 
     if (name === "PasswordException") {
