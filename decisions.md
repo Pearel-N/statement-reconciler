@@ -2,23 +2,111 @@
 
 Written as the work happened, not reconstructed at the end.
 
-Each entry is a choice that had a real alternative. What we did, why, and what
-we turned down. Kept short on purpose.
+Each entry is a choice that had a real alternative. What I did, why, and what
+I turned down. Kept short on purpose.
+
+Three days: Thursday 3rd to Saturday 5th September.
 
 ---
 
-## Day 1
+## The problem, and why this shape
+
+### The brief, and what I narrowed it to
+
+The brief was to turn messy documents into structured, queryable data. That's
+enormous. Any document type, any structure.
+
+I narrowed it to one document type: bank statements. Not because they're the
+hardest to read, but because of one property almost no other document has.
+
+### Language models get things wrong, and usually you can't tell
+
+Extraction with a model is not deterministic. Ask it to read the same
+statement twice and you can get two different answers. It will misread a
+digit, drop a row, or read a credit as a debit.
+
+For most documents there's no way to know. Extract data from a contract or an
+invoice and the only way to check is to read the document yourself — which
+defeats the point of extracting it.
+
+So the interesting question isn't *how do you extract*. It's *how do you know
+the extraction is right*.
+
+### Bank statements carry their own proof
+
+A statement declares an opening balance and a closing balance. The
+transactions between them must account for the difference. Exactly.
+
+That makes the document self-verifying. If the extracted rows don't produce
+the declared difference, the extraction is wrong. Not probably wrong — wrong.
+
+That arithmetic is the whole foundation of this app. It extracts, checks its
+own work, works out which rows are responsible, and asks a person to fix
+exactly those.
+
+**The product is not extraction. It's trustworthy extraction.**
+
+### What I deliberately did not build
+
+No charts, no spending categories, no dashboard. Charts are not the product.
+If this became a visualisation tool, the hard part disappears and it's a
+database with graphs on top.
+
+No login, no OCR for scans, no multiple currencies, no natural-language
+querying. Each has a reason, and each reason is somewhere below.
+
+The rule I set myself: if a new feature idea appears, it goes in the cut list
+with a reason, rather than into the build. I broke it zero times, including
+once when I wanted to.
+
+---
+
+## The stack, and why each piece
+
+**Next.js, App Router.** One deployable thing. Server work and screens live in
+the same project, so there's no separate API to keep in step.
+
+**Supabase.** Postgres and file storage in one hosted service. Hosted matters:
+an evaluator gets a working URL rather than a docker-compose file.
+
+**Prisma.** A typed database client, with migrations committed to the repo. So
+anyone can clone this and rebuild the same database with one command. The
+schema file doubles as documentation.
+
+**Zod.** Validates whatever the model returns before anything downstream
+touches it. One schema definition does two jobs — it validates the answer, and
+it generates the contract the model is given. They can't drift apart, because
+there's only one of them.
+
+**Claude, for extraction.** Used as a component, not an authority. It's given
+text, asked for values, and its answer is validated, then checked against
+arithmetic. Nothing assumes it's right.
+
+**decimal.js, for money.** Explained below. Money is never a float.
+
+**pdf.js, for reading PDFs.** The only library that gives text *with positions*
+on the page, which is what makes provenance possible.
+
+**Vercel, for hosting.** Deploys from the repo, and its serverless model
+shaped two real decisions below about file size and processing time.
+
+**Vitest, for tests.** Runs in plain Node, because the logic worth testing has
+no database, no framework and no model in it.
+
+---
+
+## Day 1 — Thursday
 
 ### Deploy on day one, with nothing to deploy
 
-We pushed an empty app to production before writing a feature.
+I pushed an empty app to production before writing a feature.
 
 Environment variables, database pooling and storage permissions are the three
 things that break late in a project. Deploying early means they break on day
 one, when nothing is at stake.
 
-It paid off. Two bugs only appear in production, and we found them with time
-to spare. They're at the bottom of this file.
+It paid off. Two bugs only appear in production, and I found them with time to
+spare. They're at the bottom of this file.
 
 ### Money is a Decimal, never a float
 
@@ -29,7 +117,7 @@ form. Small errors creep in and add up. Over a hundred rows that is enough to
 make a statement that balances look like it doesn't.
 
 So money is `Decimal` everywhere — Postgres `numeric` in the database,
-`decimal.js` in code. We write `a.plus(b)`, never `a + b`.
+`decimal.js` in code. I write `a.plus(b)`, never `a + b`.
 
 A test adds `0.1` ten times and demands exactly `1`. It exists so that
 swapping in a plain number breaks the build.
@@ -39,17 +127,17 @@ swapping in a plain number breaks the build.
 The shortcut is to store a debit as `-1500` and a credit as `+2000`. One
 column instead of two.
 
-We didn't. Amounts are always positive, and a separate column says which
+I didn't. Amounts are always positive, and a separate column says which
 direction the money went.
 
 The reason: a minus sign would have to be applied by the extractor — the part
-reading the PDF, which is the part we trust least. One wrong sign and the
+reading the PDF, which is the part I trust least. One wrong sign and the
 arithmetic is wrong with nothing to catch it.
 
-Keeping direction separate means the flip happens in one small function we
+Keeping direction separate means the flip happens in one small function I
 control and test.
 
-We gave up simpler summing and slightly easier filtering. Worth it.
+I gave up simpler summing and slightly easier filtering. Worth it.
 
 ### Provenance columns exist in the first migration
 
@@ -79,7 +167,7 @@ Five scored days, and access control demonstrates nothing this project is
 being judged on. The IDs are 122 bits of randomness, so they can't be guessed,
 and nothing in the app lists them.
 
-The cost is real and we say it out loud: lose the link and you lose the
+The cost is real and I say it out loud: lose the link and you lose the
 workspace. Anyone you send it to has access forever, and there's no way to
 take it back.
 
@@ -91,7 +179,7 @@ why authentication is the first thing after this.
 The browser checks a file's size, name and leading bytes so the user gets an
 instant answer. The server runs the identical functions again.
 
-That isn't distrust of the user. Anything in a browser can be bypassed — we
+That isn't distrust of the user. Anything in a browser can be bypassed — I
 proved it with a `curl` command that the server correctly rejected.
 
 The browser check is a courtesy. The server check is the control.
@@ -114,7 +202,7 @@ Uploads run in parallel and none of them can stop another.
 Drop three good statements and one junk file and you get three accepted and
 one specifically rejected, with a summary line saying so.
 
-We wanted that visible on screen rather than claimed in a README.
+I wanted that visible on screen rather than claimed in a README.
 
 ### An unfinished feature says so
 
@@ -127,12 +215,12 @@ on knowing when it's wrong, that's the worst possible thing to ship.
 ### Light theme only
 
 This is a desktop tool for finance work. A deliberate light theme reads better
-than a half-finished dark one, and we set it explicitly so the browser doesn't
+than a half-finished dark one, and I set it explicitly so the browser doesn't
 invent one.
 
 ---
 
-## Day 2
+## Day 2 — Friday
 
 ### The reconciliation engine was built before the extractor
 
@@ -153,14 +241,14 @@ Most statements print a balance after every row. The obvious approach is to
 keep your own running total and compare it to each one.
 
 That approach is useless. If row 40 is misread, your total is wrong from then
-on, so rows 41 through 140 all fail too. The app tells a human that a hundred
+on, so rows 41 through 140 all fail too. The app tells a person that a hundred
 rows are wrong — no better than saying the statement doesn't add up.
 
-What we do instead: after each row, throw away our number and start again from
+What I do instead: after each row, throw away my number and start again from
 the balance the document itself printed.
 
 Row 41 is checked against row 40's printed balance, which is correct no matter
-what we misread on row 40. So exactly one row fails, and the size of the gap
+what was misread on row 40. So exactly one row fails, and the size of the gap
 is exactly the amount that was wrong.
 
 That is the difference between "this statement doesn't add up" and "row 40 is
@@ -179,8 +267,8 @@ It would give this project nothing it uses.
 The general rule, which is the real answer: adopt a new major version when it
 gives you something you need. "It's newer" isn't a reason.
 
-We had five days, and the interesting problem was extraction — not the
-database library.
+I had five days, and the interesting problem was extraction — not the database
+library.
 
 ### The database row is written after the file arrives, not before
 
@@ -198,7 +286,7 @@ the browser's, and refuses any file path outside the workspace asking for it.
 
 Two rules about what the review screen is allowed to say.
 
-**One flag per break.** We don't merge nearby breaks. Merging made sense
+**One flag per break.** I don't merge nearby breaks. Merging made sense
 against the naive walk, where one bad row caused a cascade. Restarting from
 the printed balance removed the cascade, so two breaks are now two real
 problems.
@@ -209,10 +297,6 @@ discrepancy, the app says nothing.
 Ranking them and showing the best guess would look cleverer and be worse. On
 screen, a guess looks exactly like a proof. And a user sent to re-read a
 correct row stops trusting every flag afterwards.
-
----
-
-## Day 3
 
 ### The PDF is read once, for two different purposes
 
@@ -237,10 +321,10 @@ would close the gap and make a credit read as a debit.
 
 It's asked which numbered line it read a row from.
 
-We already know where that line sits, because the parser recorded it. So the
+I already know where that line sits, because the parser recorded it. So the
 highlight is looked up, not generated.
 
-PDFs measure from the bottom-left of the page. We convert to top-left once, at
+PDFs measure from the bottom-left of the page. I convert to top-left once, at
 the edge of the system, so nothing after that has to remember which way up the
 page is.
 
@@ -265,7 +349,7 @@ bad extraction can be debugged later without paying to reproduce it.
 
 ---
 
-## Day 4
+## Day 3 — Saturday
 
 ### Processing moves one step per request
 
@@ -318,7 +402,7 @@ Searching is the opposite case. Twelve months of one account, or a bank
 statement beside a card statement, is exactly what someone wants to look
 across.
 
-That isn't the multi-account aggregation we cut. That cut was about
+That isn't the multi-account aggregation I cut. That cut was about
 *combining* accounts, and combining is still refused. On a bank statement a
 debit means money left the account. On a card statement it means a charge you
 now owe. Adding them gives a number that means nothing.
@@ -346,14 +430,14 @@ Worse, Postgres's parser recognises structured tokens. It read
 `UPI/DR/741520749048/Lumen Broadband/NWBK` as file paths and indexed
 `Broadband/NWBK` as one token — so searching `broadband` found nothing.
 
-We flatten every separator to a space before indexing, and do the same to the
+I flatten every separator to a space before indexing, and do the same to the
 search text. A database trigger keeps the index current, because extraction,
 corrections and any future backfill all write descriptions and each would
 otherwise have to remember.
 
 Worth noting how this was found: the default setup looked like it worked. It
 only failed on the one kind of text this app actually stores, and it took
-someone typing a word a real user would type.
+typing a word a real user would type.
 
 ### The source page is drawn in the browser
 
@@ -373,14 +457,14 @@ line the model cited.
 
 ---
 
-## Day 5 — two failures that only happen in production
+## Two failures that only happen in production
 
-Both worked perfectly on a laptop and failed on every upload in production.
+Both worked perfectly on my laptop and failed on every upload in production.
 Neither was a logic error. Both were about which files get packaged.
 
 ### An optional dependency that only existed for one operating system
 
-pdfjs needs a package called `@napi-rs/canvas` to work under Node, and lists
+pdf.js needs a package called `@napi-rs/canvas` to work under Node, and lists
 it as *optional*.
 
 Optional dependencies are resolved per operating system. Installing on a Mac
@@ -395,14 +479,14 @@ dependencies are where that leaks.
 
 ### A worker file the bundler couldn't see
 
-pdfjs loads its worker by building a file path at runtime.
+pdf.js loads its worker by building a file path at runtime.
 
 Bundlers work out what to ship by following references in the code. A path
 built at runtime isn't a reference it can follow, so the worker was left out
 of the deployment.
 
 Every PDF then failed with "Setting up fake worker failed" — a message that
-points at pdfjs rather than at packaging, which is what made it slow to find.
+points at pdf.js rather than at packaging, which is what made it slow to find.
 
 Fixed by resolving the worker through a static path and naming the files
 explicitly for the bundler.
@@ -417,7 +501,7 @@ file's first eight bytes beside it — turned "it doesn't work" into
 `header: '%PDF-1.4'`, 55,953 bytes. That killed two theories in one line. The
 file had arrived intact and storage was fine, which left only packaging.
 
-That logging then had a bug of its own. pdfjs hands the file buffer to its
+That logging then had a bug of its own. pdf.js hands the file buffer to its
 worker, which empties it, so reading the header afterwards crashed — turning
 every named parse failure into an unhandled error. A test caught it, on the
 path that only runs when something else has already gone wrong.
