@@ -198,80 +198,113 @@ export async function advance(statementId: string): Promise<AdvanceResult> {
 
   // ---- Stage 3: reconcile ------------------------------------------------
   if (status === "reconciling") {
-    const stored = await prisma.transaction.findMany({
-      where: { statementId },
-      orderBy: { rowIndex: "asc" },
-    });
-
-    // Prisma's Decimal and decimal.js are the same library, but converting
-    // through the string form keeps the engine's types honest and independent
-    // of the ORM — it is meant to run without a database at all.
-    const rows: StatementRow[] = stored.map((row) => ({
-      rowIndex: row.rowIndex,
-      description: row.description,
-      amount: new Decimal(row.amount.toString()),
-      direction: row.direction as "debit" | "credit",
-      runningBalance:
-        row.runningBalance === null ? null : new Decimal(row.runningBalance.toString()),
-      sourcePage: row.sourcePage ?? 1,
-    }));
-
-    const result = reconcile(
-      {
-        openingBalance:
-          statement.openingBalance === null
-            ? null
-            : new Decimal(statement.openingBalance.toString()),
-        closingBalance:
-          statement.closingBalance === null
-            ? null
-            : new Decimal(statement.closingBalance.toString()),
-      },
-      rows,
-    );
-
-    const byRowIndex = new Map(stored.map((row) => [row.rowIndex, row.id]));
-
-    await prisma.$transaction([
-      // Flags describe the current state, so a re-run replaces them. The
-      // reconciliation history is appended, not replaced — watching the
-      // discrepancy shrink is the point of keeping it.
-      prisma.flag.deleteMany({ where: { statementId } }),
-      prisma.reconciliation.create({
-        data: {
-          statementId,
-          expectedDelta: result.expectedDelta?.toString() ?? "0",
-          actualDelta: result.actualDelta.toString(),
-          discrepancy: result.discrepancy?.toString() ?? "0",
-          isReconciled: result.isReconciled,
-        },
-      }),
-      prisma.flag.createMany({
-        data: result.flags.map((flag) => ({
-          statementId,
-          transactionId:
-            flag.rowIndex === null ? null : (byRowIndex.get(flag.rowIndex) ?? null),
-          flagType: flag.flagType,
-          severity: flag.severity,
-          detail: flag.detail,
-        })),
-      }),
-      prisma.statement.update({
-        where: { id: statementId },
-        data: {
-          status: result.isReconciled ? "verified" : "needs_review",
-          processedAt: new Date(),
-        },
-      }),
-    ]);
-
+    const result = await reconcileStatement(statementId);
     return {
       status: result.isReconciled ? "verified" : "needs_review",
       done: true,
-      discrepancy: result.discrepancy?.toString() ?? null,
-      flagCount: result.flags.length,
+      discrepancy: result.discrepancy,
+      flagCount: result.flagCount,
     };
   }
 
   return { status, done: false };
+}
+
+
+export interface ReconcileOutcome {
+  isReconciled: boolean;
+  expectedDelta: string | null;
+  actualDelta: string;
+  discrepancy: string | null;
+  flagCount: number;
+}
+
+/**
+ * Recomputes a statement's arithmetic from whatever is currently stored.
+ *
+ * Called once by the pipeline, and again after every human correction. It
+ * reads the transaction rows rather than the model's output, so a corrected
+ * value is simply what the arithmetic now sees — there is no separate
+ * "apply corrections" step to get wrong, and no second model call.
+ */
+export async function reconcileStatement(
+  statementId: string,
+): Promise<ReconcileOutcome> {
+  const statement = await prisma.statement.findUniqueOrThrow({
+    where: { id: statementId },
+  });
+
+  const stored = await prisma.transaction.findMany({
+    where: { statementId },
+    orderBy: { rowIndex: "asc" },
+  });
+
+  // Prisma's Decimal and decimal.js are the same library, but converting
+  // through the string form keeps the engine independent of the ORM — it is
+  // meant to run with no database at all.
+  const rows: StatementRow[] = stored.map((row) => ({
+    rowIndex: row.rowIndex,
+    description: row.description,
+    amount: new Decimal(row.amount.toString()),
+    direction: row.direction as "debit" | "credit",
+    runningBalance:
+      row.runningBalance === null ? null : new Decimal(row.runningBalance.toString()),
+    sourcePage: row.sourcePage ?? 1,
+  }));
+
+  const result = reconcile(
+    {
+      openingBalance:
+        statement.openingBalance === null
+          ? null
+          : new Decimal(statement.openingBalance.toString()),
+      closingBalance:
+        statement.closingBalance === null
+          ? null
+          : new Decimal(statement.closingBalance.toString()),
+    },
+    rows,
+  );
+
+  const byRowIndex = new Map(stored.map((row) => [row.rowIndex, row.id]));
+
+  await prisma.$transaction([
+    // Flags describe the present state, so a re-run replaces them. Stale
+    // flags would send someone to re-check a row they already fixed.
+    prisma.flag.deleteMany({ where: { statementId } }),
+    prisma.reconciliation.create({
+      data: {
+        statementId,
+        expectedDelta: result.expectedDelta?.toString() ?? "0",
+        actualDelta: result.actualDelta.toString(),
+        discrepancy: result.discrepancy?.toString() ?? "0",
+        isReconciled: result.isReconciled,
+      },
+    }),
+    prisma.flag.createMany({
+      data: result.flags.map((flag) => ({
+        statementId,
+        transactionId:
+          flag.rowIndex === null ? null : (byRowIndex.get(flag.rowIndex) ?? null),
+        flagType: flag.flagType,
+        severity: flag.severity,
+        detail: flag.detail,
+      })),
+    }),
+    prisma.statement.update({
+      where: { id: statementId },
+      data: {
+        status: result.isReconciled ? "verified" : "needs_review",
+        processedAt: new Date(),
+      },
+    }),
+  ]);
+
+  return {
+    isReconciled: result.isReconciled,
+    expectedDelta: result.expectedDelta?.toString() ?? null,
+    actualDelta: result.actualDelta.toString(),
+    discrepancy: result.discrepancy?.toString() ?? null,
+    flagCount: result.flags.length,
+  };
 }

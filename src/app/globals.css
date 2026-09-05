@@ -19,3 +19,32 @@ body {
   color: #1c1917;
   font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
 }
+
+/*
+  The active segment of the stage track. A moving highlight rather than a
+  spinner: the stage names carry the information, this only says "still
+  working". Extraction can take forty seconds and a static bar reads as hung.
+*/
+@keyframes stage-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(200%); }
+}
+
+.stage-active::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    rgba(255, 255, 255, 0.85),
+    transparent
+  );
+  animation: stage-sweep 1.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage-active::after {
+    animation: none;
+  }
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import {
   MAX_UPLOAD_BYTES,
@@ -33,6 +33,55 @@ const STAGE_LABEL: Record<string, string> = {
   needs_review: "Needs review",
   failed: "Failed",
 };
+
+/**
+ * The stages a statement actually passes through, in order.
+ *
+ * Because the set is known and finite, progress here is real rather than
+ * decorative: two filled segments means two stages are genuinely finished.
+ * A spinner would have claimed less and told the user nothing.
+ */
+const STAGE_ORDER = ["parsing", "extracting", "reconciling"] as const;
+
+function StageProgress({ stage }: { stage: string }) {
+  const [elapsed, setElapsed] = useState(0);
+
+  useEffect(() => {
+    const started = Date.now();
+    const timer = window.setInterval(
+      () => setElapsed(Math.floor((Date.now() - started) / 1000)),
+      1000,
+    );
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const index = STAGE_ORDER.indexOf(stage as (typeof STAGE_ORDER)[number]);
+
+  return (
+    <div className="mt-2 flex items-center gap-3">
+      <div className="flex flex-1 gap-1" aria-hidden>
+        {STAGE_ORDER.map((name, position) => {
+          const done = index > position;
+          const active = index === position;
+
+          return (
+            <div
+              key={name}
+              className={[
+                "relative h-1 flex-1 overflow-hidden rounded-full",
+                done ? "bg-blue-500" : active ? "bg-blue-400" : "bg-stone-200",
+                active ? "stage-active" : "",
+              ].join(" ")}
+            />
+          );
+        })}
+      </div>
+      <span className="w-8 shrink-0 text-right font-mono text-[11px] tabular-nums text-stone-400">
+        {elapsed > 2 ? `${elapsed}s` : ""}
+      </span>
+    </div>
+  );
+}
 
 type ItemState =
   | { kind: "checking" }
@@ -358,6 +407,17 @@ export function UploadPanel({ workspaceId }: { workspaceId: string }) {
                     {stateLabel(item.state)}
                   </span>
                 </div>
+
+                {(item.state.kind === "processing" ||
+                  item.state.kind === "uploading") && (
+                  <StageProgress
+                    // Keyed by stage so the counter remounts and restarts:
+                    // the number describes the step in progress, not the
+                    // whole upload.
+                    key={item.state.kind === "uploading" ? "" : item.state.stage}
+                    stage={item.state.kind === "uploading" ? "" : item.state.stage}
+                  />
+                )}
 
                 {item.state.kind === "rejected" && (
                   <p className="mt-1.5 text-xs leading-relaxed text-red-700">

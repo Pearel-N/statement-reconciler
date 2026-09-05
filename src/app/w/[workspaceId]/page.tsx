@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { notFound } from "next/navigation";
 
 import { UploadPanel } from "@/components/upload-panel";
@@ -97,7 +98,11 @@ export default async function WorkspacePage({
               {statements.map((statement) => {
                 const run = statement.reconciliations[0];
                 return (
-                  <li key={statement.id} className="px-4 py-3">
+                  <li key={statement.id}>
+                    <Link
+                      href={`/w/${workspaceId}/s/${statement.id}`}
+                      className="block px-4 py-3 transition hover:bg-stone-50"
+                    >
                     <div className="flex items-center gap-3">
                       <span className="min-w-0 flex-1 truncate text-sm text-stone-800">
                         {statement.filename}
@@ -139,6 +144,7 @@ export default async function WorkspacePage({
                         {statement.errorDetail}
                       </p>
                     )}
+                    </Link>
                   </li>
                 );
               })}
