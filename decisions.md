@@ -1,5 +1,16 @@
 # Decisions
 
+**A Next.js and Supabase application, built in three days, that extracts
+transactions from bank statement PDFs with Claude and then proves the
+extraction correct — reconciling it against the statement's own declared
+balances, and naming the exact rows responsible when it doesn't add up.**
+
+Live at https://statement-reconciler-topaz.vercel.app ·
+[`README.md`](./README.md) for how to run it ·
+[`SPEC.md`](./SPEC.md) for the scope set before any code was written.
+
+---
+
 Written as the work happened, not reconstructed at the end.
 
 Each entry is a choice that had a real alternative. What I did, why, and what
