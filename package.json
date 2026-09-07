@@ -13,7 +13,8 @@
     "db:studio": "prisma studio",
     "postinstall": "prisma generate && node scripts/copy-pdf-worker.mjs",
     "inspect": "tsx scripts/inspect-pdf.mts",
-    "extract": "tsx scripts/extract-pdf.mts"
+    "extract": "tsx scripts/extract-pdf.mts",
+    "seed": "tsx scripts/seed.mts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.123.0",
