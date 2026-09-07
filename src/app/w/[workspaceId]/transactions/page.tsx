@@ -8,6 +8,12 @@ import { isValidWorkspaceId } from "@/lib/workspace";
 
 export const dynamic = "force-dynamic";
 
+// Run next to the database rather than wherever the request lands. The
+// Supabase project is in ap-northeast-2, and functions were being served from
+// Washington by default — so every page paid a trans-Pacific round trip for
+// a query that takes milliseconds once it arrives.
+export const preferredRegion = "icn1";
+
 /**
  * The query surface.
  *
@@ -82,7 +88,14 @@ export default async function TransactionsPage({
       </header>
 
       <main className="mx-auto w-full max-w-6xl flex-1 px-6 py-10">
-        <h1 className="text-2xl font-semibold tracking-tight text-stone-900">
+        <Link
+          href={`/w/${workspaceId}`}
+          className="text-xs text-stone-500 underline-offset-2 hover:text-stone-900 hover:underline"
+        >
+          ← all statements
+        </Link>
+
+        <h1 className="mt-4 text-2xl font-semibold tracking-tight text-stone-900">
           Transactions
         </h1>
         <p className="mt-2 max-w-2xl text-sm leading-relaxed text-stone-600">

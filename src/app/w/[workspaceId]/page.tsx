@@ -11,6 +11,12 @@ import { isValidWorkspaceId } from "@/lib/workspace";
 // visitor someone else's statements, or their own from minutes ago.
 export const dynamic = "force-dynamic";
 
+// Run next to the database rather than wherever the request lands. The
+// Supabase project is in ap-northeast-2, and functions were being served from
+// Washington by default — so every page paid a trans-Pacific round trip for
+// a query that takes milliseconds once it arrives.
+export const preferredRegion = "icn1";
+
 const STATUS_STYLE: Record<string, string> = {
   uploaded: "bg-stone-100 text-stone-600",
   parsing: "bg-blue-50 text-blue-700",

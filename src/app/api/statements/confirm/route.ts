@@ -6,6 +6,12 @@ import { isStorageConfigured, storage } from "@/lib/supabase";
 import { MAX_UPLOAD_BYTES } from "@/lib/upload-validation";
 import { isValidWorkspaceId } from "@/lib/workspace";
 
+// Run next to the database rather than wherever the request lands. The
+// Supabase project is in ap-northeast-2, and functions were being served from
+// Washington by default — so every page paid a trans-Pacific round trip for
+// a query that takes milliseconds once it arrives.
+export const preferredRegion = "icn1";
+
 /**
  * Step two of an upload: the browser says the bytes are in storage.
  *

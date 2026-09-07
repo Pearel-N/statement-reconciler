@@ -4,6 +4,12 @@ import { prisma } from "@/lib/prisma";
 import { storage } from "@/lib/supabase";
 import { isValidWorkspaceId } from "@/lib/workspace";
 
+// Run next to the database rather than wherever the request lands. The
+// Supabase project is in ap-northeast-2, and functions were being served from
+// Washington by default — so every page paid a trans-Pacific round trip for
+// a query that takes milliseconds once it arrives.
+export const preferredRegion = "icn1";
+
 /**
  * Hands the browser a short-lived link to the original PDF, so the review
  * screen can show the page a row came from.

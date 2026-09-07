@@ -509,3 +509,34 @@ path that only runs when something else has already gone wrong.
 The wider point, and the reason deploying on day one was worth it: a laptop
 cannot find these. Only production has the other operating system and the
 other bundler.
+
+---
+
+## After the first end-to-end pass
+
+### Functions run next to the database
+
+Every page reads the database on each request, and the Supabase project is in
+Seoul. Vercel was serving the functions from Washington by default, so each
+page paid a trans-Pacific round trip for a query that takes milliseconds once
+it arrives. Navigation took two to three seconds.
+
+Pinning the functions to the same region removes the round trip.
+
+Seoul was itself a compromise — Mumbai would be closer to the user — but the
+region was fixed when the project was created, and moving the database late
+would have been a bigger risk than the latency it saves.
+
+### Every page has a loading state
+
+The App Router fetches a page from the server before it transitions. Without a
+`loading.tsx` the previous screen simply sits there until the new one arrives,
+so a click looks like nothing happened.
+
+That reads as broken rather than slow, which is a worse impression than the
+delay itself. Each route now paints a skeleton of its own shape immediately.
+
+Worth noting that the region fix and this one solve different problems. One
+makes it faster; the other makes it honest about what it's doing. The second
+matters more, because a user who can see that something is happening will wait
+and a user who can't will click again.

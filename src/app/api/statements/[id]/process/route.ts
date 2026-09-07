@@ -2,6 +2,12 @@ import { NextResponse } from "next/server";
 
 import { advance } from "@/lib/pipeline";
 
+// Run next to the database rather than wherever the request lands. The
+// Supabase project is in ap-northeast-2, and functions were being served from
+// Washington by default — so every page paid a trans-Pacific round trip for
+// a query that takes milliseconds once it arrives.
+export const preferredRegion = "icn1";
+
 /**
  * Advances one statement by one stage.
  *
