@@ -96,7 +96,7 @@ Needs Node 20+ and a free Supabase project.
 git clone <repo-url>
 cd statement-reconciler
 npm install
-cp .env.example .env      # five values, each documented in the file
+cp .env.example .env      # six values, each documented in the file
 npm run db:migrate
 npm run dev
 ```
@@ -108,7 +108,9 @@ That URL is the key — there is no login.
 `statements`, then copy the two connection strings and the API URL and secret
 key into `.env`. The comments in `.env.example` say which is which.
 
-**One extra value for extraction:** `ANTHROPIC_API_KEY`.
+**And one key for extraction:** `ANTHROPIC_API_KEY` from console.anthropic.com.
+
+Everything else in `.env.example` has a working default.
 
 ### Commands
 
