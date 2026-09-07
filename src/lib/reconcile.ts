@@ -193,14 +193,29 @@ export function walkRunningBalance(
  * Both are `error` severity: the arithmetic is provably broken either way.
  * `warning` is reserved for things that are suspicious but might be fine.
  */
-export function classifyBreaks(breaks: BalanceBreak[]): Flag[] {
+/**
+ * How amounts are written into flag messages.
+ *
+ * The engine has no idea what currency it is looking at, and shouldn't — it
+ * is meant to run with no database and no locale. So formatting is injected.
+ * The default writes the plain decimal, which is what the tests assert; the
+ * pipeline passes one that groups digits the way the rest of the UI does.
+ */
+export type AmountFormatter = (value: Decimal) => string;
+
+const plain: AmountFormatter = (value) => value.toString();
+
+export function classifyBreaks(
+  breaks: BalanceBreak[],
+  format: AmountFormatter = plain,
+): Flag[] {
   return breaks.map((balanceBreak) => {
     const { rowIndex, expected, actual, gap, crossesPageBoundary } =
       balanceBreak;
 
     // The gap's sign says which way the balance moved; for a human the size
     // is what matters, and the expected/actual pair already shows direction.
-    const size = gap.abs().toString();
+    const size = format(gap.abs());
 
     if (crossesPageBoundary) {
       return {
@@ -209,7 +224,7 @@ export function classifyBreaks(breaks: BalanceBreak[]): Flag[] {
         rowIndex,
         detail:
           `The balance at the top of this page differs by ${size}. ` +
-          `Expected ${expected.toString()}, the statement shows ${actual.toString()}. ` +
+          `Expected ${format(expected)}, the statement shows ${format(actual)}. ` +
           `A row was probably lost between pages.`,
       };
     }
@@ -220,7 +235,7 @@ export function classifyBreaks(breaks: BalanceBreak[]): Flag[] {
       rowIndex,
       detail:
         `This row's balance is off by ${size}. ` +
-        `Expected ${expected.toString()}, the statement shows ${actual.toString()}. ` +
+        `Expected ${format(expected)}, the statement shows ${format(actual)}. ` +
         `The amount or the debit/credit direction on this row is probably wrong.`,
     };
   });
@@ -256,6 +271,7 @@ export function classifyBreaks(breaks: BalanceBreak[]): Flag[] {
 export function explainResidualDiscrepancy(
   discrepancy: Decimal,
   rows: StatementRow[],
+  format: AmountFormatter = plain,
 ): Flag[] {
   if (discrepancy.isZero()) return [];
 
@@ -284,8 +300,8 @@ export function explainResidualDiscrepancy(
         severity: "error",
         rowIndex: suspect.rowIndex,
         detail:
-          `The statement is out by ${discrepancy.abs().toString()}, which is exactly twice this row's ` +
-          `${suspect.amount.toString()}. It was read as a ${flippedFrom} and is probably a ${shouldBe}.`,
+          `The statement is out by ${format(discrepancy.abs())}, which is exactly twice this row's ` +
+          `${format(suspect.amount)}. It was read as a ${flippedFrom} and is probably a ${shouldBe}.`,
       },
     ];
   }
@@ -319,7 +335,7 @@ export function explainResidualDiscrepancy(
         rowIndex: copy.rowIndex,
         detail:
           `This row is identical to an earlier one, and removing it would close ` +
-          `the ${discrepancy.abs().toString()} gap exactly. It was probably extracted twice.`,
+          `the ${format(discrepancy.abs())} gap exactly. It was probably extracted twice.`,
       },
     ];
   }
@@ -335,6 +351,7 @@ export function explainResidualDiscrepancy(
 export function reconcile(
   declaration: StatementDeclaration,
   rows: StatementRow[],
+  format: AmountFormatter = plain,
 ): ReconciliationResult {
   const actualDelta = sumSignedAmounts(rows);
 
@@ -378,8 +395,8 @@ export function reconcile(
   const breaks = walkRunningBalance(declaration.openingBalance, rows);
   const flags =
     breaks.length > 0
-      ? classifyBreaks(breaks)
-      : explainResidualDiscrepancy(discrepancy, rows);
+      ? classifyBreaks(breaks, format)
+      : explainResidualDiscrepancy(discrepancy, rows, format);
 
   return {
     expectedDelta,

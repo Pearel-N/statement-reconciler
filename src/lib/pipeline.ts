@@ -4,6 +4,7 @@ import { extractStatement } from "@/lib/extract/extract";
 import { deriveProvenance } from "@/lib/extract/provenance";
 import { parsePdf } from "@/lib/pdf/parse";
 import { prisma } from "@/lib/prisma";
+import { formatMoney } from "@/lib/money";
 import { reconcile, type StatementRow } from "@/lib/reconcile";
 import { storage } from "@/lib/supabase";
 
@@ -264,6 +265,9 @@ export async function reconcileStatement(
           : new Decimal(statement.closingBalance.toString()),
     },
     rows,
+    // Flag messages are read beside formatted balances, so they are written
+    // the same way rather than as bare decimals.
+    (value) => formatMoney(value.toString(), statement.currency),
   );
 
   const byRowIndex = new Map(stored.map((row) => [row.rowIndex, row.id]));

@@ -27,7 +27,10 @@ The product is not extraction. It's *trustworthy* extraction.
 
 ## Try it in two minutes
 
-Open the live app and drop in a file from [`fixtures/`](./fixtures):
+**A workspace with all four already processed:**
+https://statement-reconciler-topaz.vercel.app/w/decade00-0000-4000-8000-000000000001
+
+Or open the live app and drop in a file from [`fixtures/`](./fixtures) yourself:
 
 | File | What you'll see |
 |---|---|
@@ -115,6 +118,7 @@ key into `.env`. The comments in `.env.example` say which is which.
 | `npm run inspect -- fixtures/clean.pdf` | Prints what the parser sees, no model call |
 | `npm run extract -- fixtures/missing-row.pdf` | Runs the whole pipeline in the terminal and prints the verdict. Results are cached by file hash; `--fresh` re-runs the model |
 | `npm run db:studio` | Browse the database |
+| `npm run seed` | Fills the demo workspace with all four fixtures |
 
 `npm run extract` is the fastest way to see the interesting part without a
 browser.
@@ -161,6 +165,7 @@ Everything interesting is in `src/lib`:
 | `extract/` | The schema, the prompt, and provenance matching |
 | `pipeline.ts` | One processing stage per request |
 
+[`SPEC.md`](./SPEC.md) is the scope document written before any code.
 [`decisions.md`](./decisions.md) has the reasoning behind every choice,
 written as the work happened — including two bugs that only appeared in
 production and how they were tracked down.

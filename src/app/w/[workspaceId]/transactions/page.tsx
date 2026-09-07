@@ -138,8 +138,9 @@ export default async function TransactionsPage({
                 <option value="">all statements</option>
                 {statements.map((s) => (
                   <option key={s.id} value={s.id}>
-                    {s.bankName ?? s.filename}
-                    {s.status === "needs_review" ? " (unverified)" : ""}
+                    {s.filename}
+                    {s.bankName ? ` · ${s.bankName}` : ""}
+                    {s.status === "needs_review" ? " · unverified" : ""}
                   </option>
                 ))}
               </select>

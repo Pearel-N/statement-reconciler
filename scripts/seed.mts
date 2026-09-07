@@ -25,8 +25,14 @@ try {
   // Fine if the values are already exported.
 }
 
-/** Fixed, so the README's link survives a reseed. */
-const DEMO_WORKSPACE = "d3m00000-0000-4000-8000-000000000001";
+/**
+ * Fixed, so the README's link survives a reseed.
+ *
+ * Every character must be valid hex, and it has to satisfy the same v4 shape
+ * the app validates against — a memorable-looking ID that isn't a real UUID
+ * gets rejected by Postgres and 404s in the app.
+ */
+const DEMO_WORKSPACE = "decade00-0000-4000-8000-000000000001";
 
 const FIXTURES = [
   "clean.pdf",
