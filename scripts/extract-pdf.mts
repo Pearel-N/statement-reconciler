@@ -19,7 +19,12 @@ import { join } from "node:path";
 
 import { Decimal } from "decimal.js";
 
-import { extractStatement, type ExtractionResult } from "@/lib/extract/extract";
+import {
+  extractStatementPage,
+  looksLikeStatement,
+  mergeExtractions,
+} from "@/lib/extract/extract";
+import type { ExtractedStatement } from "@/lib/extract/schema";
 import { deriveProvenance } from "@/lib/extract/provenance";
 import { parsePdf } from "@/lib/pdf/parse";
 import { reconcile, type StatementRow } from "@/lib/reconcile";
@@ -55,28 +60,45 @@ const fingerprint = createHash("sha256")
   .slice(0, 16);
 const cachePath = join(CACHE_DIR, `${fingerprint}.json`);
 
-let extraction: ExtractionResult;
+// Mirrors production: one page per call, then merge. Running the whole
+// document in one request is what outgrew the serverless time limit, so
+// testing it that way locally would test the wrong thing.
+let statement: ExtractedStatement;
 
 if (!fresh && existsSync(cachePath)) {
-  // Cached output was produced by this same code path, so it has already
-  // been through the schema once.
-  extraction = JSON.parse(readFileSync(cachePath, "utf8")) as ExtractionResult;
+  statement = JSON.parse(readFileSync(cachePath, "utf8")) as ExtractedStatement;
   console.log("(cached extraction — pass --fresh to re-run the model)");
 } else {
-  extraction = await extractStatement(parsed.pages);
-  if (extraction.ok) {
-    mkdirSync(CACHE_DIR, { recursive: true });
-    writeFileSync(cachePath, JSON.stringify(extraction, null, 2));
+  if (!looksLikeStatement(parsed.pages)) {
+    console.log("refused at extraction: not_a_statement");
+    process.exit(0);
   }
-}
 
-if (!extraction.ok) {
-  console.log(`refused at extraction: ${extraction.code}`);
-  console.log(`"${extraction.message}"`);
-  process.exit(0);
-}
+  const byPage = new Map<number, ExtractedStatement>();
 
-const { statement } = extraction;
+  for (const page of parsed.pages) {
+    const started = Date.now();
+    process.stdout.write(
+      `  page ${page.pageNumber}/${parsed.pageCount}…`.padEnd(20),
+    );
+
+    const result = await extractStatementPage(parsed.pages, page.pageNumber);
+
+    if (!result.ok) {
+      console.log(` refused: ${result.code} — ${result.message}`);
+      process.exit(0);
+    }
+
+    byPage.set(page.pageNumber, result.statement);
+    console.log(
+      ` ${result.statement.transactions.length} rows in ${((Date.now() - started) / 1000).toFixed(1)}s`,
+    );
+  }
+
+  statement = mergeExtractions(byPage);
+  mkdirSync(CACHE_DIR, { recursive: true });
+  writeFileSync(cachePath, JSON.stringify(statement, null, 2));
+}
 
 console.log(`\nbank         ${statement.bankName ?? "(not found)"}`);
 console.log(`account      ${statement.accountNumberMasked ?? "(not found)"}`);

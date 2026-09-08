@@ -86,7 +86,7 @@ function StageProgress({ stage }: { stage: string }) {
 type ItemState =
   | { kind: "checking" }
   | { kind: "uploading" }
-  | { kind: "processing"; stage: string }
+  | { kind: "processing"; stage: string; page?: number; pageCount?: number }
   | {
       kind: "settled";
       statementId: string;
@@ -119,8 +119,14 @@ function stateLabel(state: ItemState): string {
       return "Checking";
     case "uploading":
       return "Uploading";
-    case "processing":
-      return STAGE_LABEL[state.stage] ?? state.stage;
+    case "processing": {
+      const label = STAGE_LABEL[state.stage] ?? state.stage;
+      // Extraction reads a page per request, so the count is the real one
+      // rather than a guess at how far along it might be.
+      return state.page && state.pageCount
+        ? `${label} · page ${state.page} of ${state.pageCount}`
+        : label;
+    }
     case "settled":
       return STAGE_LABEL[state.status] ?? state.status;
     case "rejected":
@@ -207,7 +213,12 @@ export function UploadPanel({ workspaceId }: { workspaceId: string }) {
           return;
         }
 
-        patch(id, { kind: "processing", stage: payload.status });
+        patch(id, {
+          kind: "processing",
+          stage: payload.status,
+          page: payload.page,
+          pageCount: payload.pageCount,
+        });
       }
 
       patch(id, {
