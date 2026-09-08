@@ -62,11 +62,32 @@ export type ParseResult =
 const LINE_TOLERANCE_PT = 2.5;
 
 /**
- * Width of one character column when rendering a line as fixed-width text.
- * Roughly the advance width of a digit at the sizes statements use. Smaller
- * values preserve more positional detail at the cost of longer lines.
+ * Width of one character column when rendering a line as fixed-width text,
+ * on a page the size of A4.
  */
 const CHAR_WIDTH_PT = 4.2;
+
+/** A4 in points, the size these constants were chosen against. */
+const REFERENCE_PAGE_WIDTH = 595.28;
+
+/**
+ * Both constants above are in points, which quietly assumes every PDF uses
+ * the same units. They don't.
+ *
+ * A real statement turned up whose pages are 2125 points wide rather than 595
+ * — generated at roughly three and a half times the usual scale. With a fixed
+ * character width, every line was padded out to 438 characters and two thirds
+ * of the prompt was whitespace. The document was three pages and produced
+ * 131,000 characters, which was enough for the request to outlive the
+ * function that made it. The user saw a network error.
+ *
+ * Scaling to the page keeps the rendering the same shape whatever units the
+ * document uses: an A4 page is unaffected, and the oversized one shrinks by
+ * more than half.
+ */
+function pageScale(pageWidth: number): number {
+  return pageWidth / REFERENCE_PAGE_WIDTH;
+}
 
 /**
  * Below this many characters across the whole document, there is effectively
@@ -79,14 +100,15 @@ function fail(code: ParseFailureCode, message: string): ParseResult {
   return { ok: false, code, message };
 }
 
-function groupIntoLines(items: TextItem[]): TextLine[] {
+function groupIntoLines(items: TextItem[], scale: number): TextLine[] {
   const sorted = [...items].sort((a, b) => a.y - b.y || a.x - b.x);
   const lines: TextLine[] = [];
+  const tolerance = LINE_TOLERANCE_PT * scale;
 
   for (const item of sorted) {
     const current = lines[lines.length - 1];
 
-    if (current && Math.abs(current.y - item.y) <= LINE_TOLERANCE_PT) {
+    if (current && Math.abs(current.y - item.y) <= tolerance) {
       current.items.push(item);
     } else {
       lines.push({ y: item.y, items: [item], layout: "" });
@@ -95,7 +117,7 @@ function groupIntoLines(items: TextItem[]): TextLine[] {
 
   for (const line of lines) {
     line.items.sort((a, b) => a.x - b.x);
-    line.layout = renderLayout(line.items);
+    line.layout = renderLayout(line.items, CHAR_WIDTH_PT * scale);
   }
 
   return lines;
@@ -110,11 +132,11 @@ function groupIntoLines(items: TextItem[]): TextLine[] {
  * single spaces would silently close the gap and make a credit look like a
  * debit. Padding to position keeps the hole where it is.
  */
-function renderLayout(items: TextItem[]): string {
+function renderLayout(items: TextItem[], charWidth: number): string {
   let out = "";
 
   for (const item of items) {
-    const column = Math.round(item.x / CHAR_WIDTH_PT);
+    const column = Math.round(item.x / charWidth);
     if (column > out.length) {
       out += " ".repeat(column - out.length);
     } else if (out.length > 0) {
@@ -237,7 +259,7 @@ export async function parsePdf(
         pageNumber,
         width: viewport.width,
         height: viewport.height,
-        lines: groupIntoLines(items),
+        lines: groupIntoLines(items, pageScale(viewport.width)),
       });
     }
   } catch (error) {

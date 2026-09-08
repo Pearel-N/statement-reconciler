@@ -171,10 +171,26 @@ export function UploadPanel({ workspaceId }: { workspaceId: string }) {
           method: "POST",
         });
 
-        const payload = await response.json();
+        // A stage that runs out of time is killed by the platform, which
+        // answers with a gateway error page rather than our JSON. Parsing that
+        // blindly threw, and the throw was caught by the outer handler and
+        // reported as "couldn't reach the server" — which is not what
+        // happened, and sent the user looking at their wifi.
+        const payload = await response.json().catch(() => null);
 
         if (!response.ok) {
-          patch(id, { kind: "rejected", rejection: toRejection(payload) });
+          if (payload) {
+            patch(id, { kind: "rejected", rejection: toRejection(payload) });
+          } else {
+            patch(id, {
+              kind: "rejected",
+              rejection: {
+                code: "stage_timed_out",
+                message:
+                  "A processing step ran out of time. Very large statements can exceed the limit — this one may be too big for a single pass.",
+              },
+            });
+          }
           return;
         }
 

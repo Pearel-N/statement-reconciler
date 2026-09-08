@@ -596,3 +596,43 @@ precisely what the declared balances bound.
 Running the walk in that case, and saying plainly which class of error is
 still being checked and which isn't, is the next thing I would build. It is
 not in this version.
+
+### The layout renderer assumed every PDF uses the same units
+
+A real statement arrived whose pages are 2125 points wide rather than A4's
+595 — generated at roughly three and a half times the usual scale.
+
+The fixed-width renderer pads each fragment to the column its x position
+implies, using a character width measured in points. On a page that size,
+every line was padded out to 438 characters and two thirds of the prompt was
+whitespace. Three pages produced 131,000 characters, and the request outlived
+the function making it. The user saw "couldn't reach the server".
+
+The character width is now scaled to the page. An A4 document is completely
+unaffected; the oversized one shrinks by 54%. A test pins the A4 case so the
+regression can't come back quietly.
+
+### A step that runs out of time now says so
+
+When a processing step exceeds its limit, the platform kills it and answers
+with a gateway error page rather than the JSON the client expects. Parsing
+that threw, the throw was caught by the outer network handler, and the user
+was told the server couldn't be reached — which was untrue and sent them to
+check their wifi.
+
+The client now distinguishes a response it can't parse from a request that
+never arrived, and says the step ran out of time.
+
+### Very large statements are still a limitation
+
+The scaling fix halves the prompt but doesn't remove the ceiling. A statement
+with several hundred transactions produces enough output that generation alone
+can exceed the time a single function is allowed.
+
+The real fix follows the architecture already here: extraction is one stage of
+a pipeline that advances one step per request, so it can become one step *per
+page*, with each call doing a page and returning. Nothing about the staging
+would need to change — only the unit of work.
+
+That isn't in this version. What is in this version is that the failure is now
+reported accurately rather than blamed on the network.

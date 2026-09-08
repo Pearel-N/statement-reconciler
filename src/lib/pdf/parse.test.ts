@@ -82,6 +82,32 @@ describe("parsePdf", () => {
     expect(result.message).toMatch(/scanned/i);
   });
 
+  it("renders the same shape whatever units the page uses", async () => {
+    // A real statement turned up with pages 2125 points wide instead of 595.
+    // With a fixed character width every line was padded to 438 characters
+    // and two thirds of the prompt was whitespace, which was enough to push
+    // the request past the time limit of the function running it.
+    const result = await parsePdf(fixture("clean.pdf"));
+    if (!result.ok) throw new Error("expected a parse");
+
+    const longest = Math.max(
+      ...result.pages.flatMap((page) => page.lines.map((l) => l.layout.length)),
+    );
+
+    // A4 output stays in the range the constants were chosen for. The
+    // regression this guards against produced lines nearly three times this.
+    expect(longest).toBeLessThan(200);
+
+    const whitespace = result.pages
+      .flatMap((page) => page.lines)
+      .reduce((n, line) => n + (line.layout.match(/ /g)?.length ?? 0), 0);
+    const total = result.pages
+      .flatMap((page) => page.lines)
+      .reduce((n, line) => n + line.layout.length, 0);
+
+    expect(whitespace / total).toBeLessThan(0.6);
+  });
+
   it("refuses a file that isn't a PDF at all", async () => {
     const result = await parsePdf(new TextEncoder().encode("not a pdf"));
 
