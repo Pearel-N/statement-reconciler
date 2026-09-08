@@ -623,16 +623,41 @@ check their wifi.
 The client now distinguishes a response it can't parse from a request that
 never arrived, and says the step ran out of time.
 
-### Very large statements are still a limitation
+### Large statements exceed the time a single request is allowed
 
-The scaling fix halves the prompt but doesn't remove the ceiling. A statement
-with several hundred transactions produces enough output that generation alone
-can exceed the time a single function is allowed.
+Extraction runs inside one serverless function call, which is capped at sixty
+seconds. A sixteen-page bank statement spends longer than that generating its
+answer, so the platform kills it and the upload fails.
 
-The real fix follows the architecture already here: extraction is one stage of
-a pipeline that advances one step per request, so it can become one step *per
-page*, with each call doing a page and returning. Nothing about the staging
-would need to change — only the unit of work.
+That is a real limitation and it affects real documents. The generated
+fixtures are three pages and finish comfortably; two genuine statements I
+tested with do not.
 
-That isn't in this version. What is in this version is that the failure is now
-reported accurately rather than blamed on the network.
+**The fix is written, on the `page-by-page-extraction` branch, and not
+merged.**
+
+Extraction becomes one call per *page* rather than one per document. Each
+page's result is stored in `raw_extraction` keyed by page; when every page is
+in they are merged — identity fields from the first page that prints them, the
+opening balance from the earliest page and the closing balance from the
+latest, which is what keeps the oracle bounding the whole document even though
+it was read a page at a time.
+
+Two things fall out of it. A crash resumes at the page it stopped on rather
+than paying to re-read the rest. And the upload screen can show "page 3 of
+16", which is the real number rather than a guess at progress.
+
+The pipeline needed no changes at all. It already advanced one stage per
+request; this only changes the size of the unit it advances by. That the fix
+was small is the strongest argument for the staging decision.
+
+**Why it isn't merged.** It is written and type-checked, with tests for the
+merge, but I have not validated it against enough real statements to be
+confident in it — each full run costs real money against my own API budget,
+and I would rather ship something tested than something plausible. Shipping an
+unverified rewrite of the extraction path, after submitting, to fix a failure
+that now at least reports itself honestly, is the wrong trade.
+
+The raising-the-timeout alternative was considered and rejected: a paid plan
+allows five minutes instead of one, which buys headroom rather than removing
+the ceiling, and a long enough statement would still fail.
