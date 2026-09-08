@@ -551,3 +551,48 @@ Worth noting that the region fix and this one solve different problems. One
 makes it faster; the other makes it honest about what it's doing. The second
 matters more, because a user who can see that something is happening will wait
 and a user who can't will click again.
+
+---
+
+## A real statement, after submitting
+
+### The "is this a statement" check was too strict about dates
+
+I described this check as deliberately permissive, on the grounds that
+wrongly turning away a real statement is far worse than letting an invoice
+through — an invoice costs one model call, which the schema and the
+arithmetic then reject.
+
+It wasn't permissive enough. It matched dates separated by `/` or `-` only.
+An ICICI transaction export writes `08.06.2026` with dots, so not one of its
+214 rows matched, and a genuine bank statement was refused with a confident
+message saying it didn't look like a bank statement.
+
+The pattern now accepts `.`, `/` and `-`, and month names. A false positive
+here is cheap and a false negative is not, so it errs wide on purpose. There
+are tests for each format, including the one that failed.
+
+Found by testing with a real statement rather than the fixtures I generated —
+which is exactly why that was on the list.
+
+### Some statements declare no opening or closing balance at all
+
+The same document is a *transaction history* rather than a statement. It
+prints a running balance on every row but never declares an opening or
+closing figure, so there is nothing for the reconciliation oracle to check
+against.
+
+The app already handles this honestly: it keeps the rows and reports that the
+statement cannot be verified, rather than claiming success. That is the right
+behaviour and it is tested.
+
+But it is weaker than it needs to be. Where a running-balance column exists,
+the row-to-row walk is still a genuine independent check — each printed
+balance must equal the previous one plus or minus that row's amount — and it
+catches misread amounts and dropped rows without any declared totals. What it
+cannot catch is rows missing from the very start or the very end, which is
+precisely what the declared balances bound.
+
+Running the walk in that case, and saying plainly which class of error is
+still being checked and which isn't, is the next thing I would build. It is
+not in this version.

@@ -26,7 +26,21 @@ export type ExtractionResult =
 const MODEL = process.env.ANTHROPIC_MODEL ?? "claude-sonnet-5";
 const TOOL_NAME = "record_statement";
 
-const DATE_LIKE = /\b\d{1,4}[/-]\d{1,2}[/-]\d{1,4}\b/;
+/**
+ * Dates as banks actually write them.
+ *
+ * This originally accepted only `/` and `-`, which quietly rejected an entire
+ * real statement: ICICI writes `08.06.2026` with dots, so not a single row
+ * matched and the document was refused as "not a bank statement" — before any
+ * model call, with a confident message, and wrongly.
+ *
+ * That is the expensive mistake in this check. Letting a non-statement
+ * through costs one model call, which the schema and then the arithmetic will
+ * reject. Turning away a real statement costs the user the whole product. So
+ * this is now wide: separators of `.`, `/` or `-`, and month names.
+ */
+const DATE_LIKE =
+  /\b(\d{1,4}[./-]\d{1,2}[./-]\d{1,4}|\d{1,2}[\s./-]*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*[\s./-]*\d{2,4})\b/i;
 const MONEY_LIKE = /\d[\d,]*\.\d{2}\b/;
 const BALANCE_WORDS = /\b(balance|opening|closing|b\/f|brought forward)\b/i;
 
@@ -94,10 +108,16 @@ Rules:
   credit. Do not infer direction from the description.
 - Amounts are always positive. Direction is carried by the direction field.
 - Strip digit separators. "1,23,857.14" is reported as "123857.14".
-- Dates are ISO: 2026-04-01. If a statement uses DD/MM/YYYY, read it as
-  DD/MM/YYYY. Use the statement period to resolve any ambiguity.
+- Dates are ISO in your answer: 2026-04-01. Statements write them many ways —
+  DD/MM/YYYY, DD.MM.YYYY, DD-MMM-YY, "8 Jun 2026". Read day-first unless the
+  document clearly shows otherwise, and use the statement period stated at the
+  top to resolve any ambiguity.
 - A row whose description wraps onto the following line is still one
-  transaction. Cite the line the amounts are on.
+  transaction — some layouts wrap it over several lines. Cite the line the
+  amounts are on.
+- Some statements print a per-row balance but declare no opening or closing
+  balance anywhere. That is normal for a "transaction history" export. Report
+  the balances as null rather than inferring them from the rows.
 - Every transaction must cite the page and line number it came from.
 - If a value is genuinely absent, use null. Never invent one, and never carry
   a value over from a neighbouring row.
