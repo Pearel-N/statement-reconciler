@@ -1,6 +1,11 @@
 import { Decimal } from "decimal.js";
 
-import { extractStatement } from "@/lib/extract/extract";
+import {
+  extractStatementPage,
+  looksLikeStatement,
+  mergeExtractions,
+} from "@/lib/extract/extract";
+import type { ExtractedStatement } from "@/lib/extract/schema";
 import { deriveProvenance } from "@/lib/extract/provenance";
 import { parsePdf } from "@/lib/pdf/parse";
 import { prisma } from "@/lib/prisma";
@@ -45,6 +50,9 @@ export interface AdvanceResult {
   errorDetail?: string | null;
   discrepancy?: string | null;
   flagCount?: number;
+  /** Which page extraction is on, so the progress shown is the real one. */
+  page?: number;
+  pageCount?: number;
 }
 
 const TERMINAL: Stage[] = ["verified", "needs_review", "failed"];
@@ -126,7 +134,17 @@ export async function advance(statementId: string): Promise<AdvanceResult> {
     return { status: "extracting", done: false };
   }
 
-  // ---- Stage 2: extract --------------------------------------------------
+  // ---- Stage 2: extract, one page per call --------------------------------
+  //
+  // Extracting a whole document outgrew the time a single serverless function
+  // is allowed — a sixteen-page statement spent over sixty seconds generating
+  // its answer and was killed mid-flight. Reading one page per call keeps
+  // every request small and works at any statement length.
+  //
+  // Progress lives in `raw_extraction`, keyed by page. That column already
+  // existed to hold the model's unedited output; holding it per page costs
+  // nothing extra and means a crash resumes at the page it stopped on rather
+  // than paying to re-read the ones already done.
   if (status === "extracting") {
     const bytes = await loadPdf(statement.storagePath);
     if (!bytes) {
@@ -145,17 +163,64 @@ export async function advance(statementId: string): Promise<AdvanceResult> {
       return fail(statementId, parsed.code, parsed.message);
     }
 
-    const extraction = await extractStatement(parsed.pages);
+    // The cheap structural check runs once, before the first model call.
+    const store = (statement.rawExtraction ?? {}) as {
+      pages?: Record<string, ExtractedStatement>;
+    };
+    const done = store.pages ?? {};
 
-    if (!extraction.ok) {
-      await prisma.statement.update({
-        where: { id: statementId },
-        data: { rawExtraction: (extraction.raw ?? null) as never },
-      });
-      return fail(statementId, extraction.code, extraction.message);
+    if (Object.keys(done).length === 0 && !looksLikeStatement(parsed.pages)) {
+      return fail(
+        statementId,
+        "not_a_statement",
+        "This doesn't look like a bank statement — I couldn't find a transaction list or account balances.",
+      );
     }
 
-    const { statement: extracted } = extraction;
+    const next = parsed.pages.find((page) => !(String(page.pageNumber) in done));
+
+    if (next) {
+      const result = await extractStatementPage(parsed.pages, next.pageNumber);
+
+      if (!result.ok) {
+        await prisma.statement.update({
+          where: { id: statementId },
+          data: { rawExtraction: { pages: done } as never },
+        });
+        return fail(statementId, result.code, result.message);
+      }
+
+      await prisma.statement.update({
+        where: { id: statementId },
+        data: {
+          pageCount: parsed.pageCount,
+          rawExtraction: {
+            pages: { ...done, [String(next.pageNumber)]: result.statement },
+          } as never,
+        },
+      });
+
+      return {
+        status: "extracting",
+        done: false,
+        page: next.pageNumber,
+        pageCount: parsed.pageCount,
+      };
+    }
+
+    // Every page is in. Combine them and write the rows.
+    const byPage = new Map<number, ExtractedStatement>(
+      Object.entries(done).map(([n, v]) => [Number(n), v]),
+    );
+    const extracted = mergeExtractions(byPage);
+
+    if (extracted.containsMultipleStatements) {
+      return fail(
+        statementId,
+        "multiple_statements",
+        "This file appears to contain more than one statement — please upload each separately.",
+      );
+    }
 
     await prisma.$transaction([
       // Re-extraction replaces rather than appends, so running this stage
@@ -171,7 +236,6 @@ export async function advance(statementId: string): Promise<AdvanceResult> {
           openingBalance: extracted.openingBalance,
           closingBalance: extracted.closingBalance,
           currency: extracted.currency,
-          rawExtraction: (extraction.raw ?? null) as never,
           status: "reconciling",
         },
       }),
@@ -194,7 +258,7 @@ export async function advance(statementId: string): Promise<AdvanceResult> {
       }),
     ]);
 
-    return { status: "reconciling", done: false };
+    return { status: "reconciling", done: false, pageCount: parsed.pageCount };
   }
 
   // ---- Stage 3: reconcile ------------------------------------------------

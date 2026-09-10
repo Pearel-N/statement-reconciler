@@ -91,9 +91,45 @@ export function asNumberedText(pages: ParsedPage[]): string {
     .join("\n\n");
 }
 
+/**
+ * Merges per-page results into one statement.
+ *
+ * Statement-level facts appear on whichever page prints them: the bank and
+ * account usually on the first, the closing balance often on the last. So the
+ * first non-null wins for identity, the earliest page's opening balance and
+ * the latest page's closing balance win for the figures — which is what makes
+ * the reconciliation oracle still bound the whole document even though it was
+ * read a page at a time.
+ */
+export function mergeExtractions(
+  byPage: Map<number, ExtractedStatement>,
+): ExtractedStatement {
+  const ordered = [...byPage.entries()].sort((a, b) => a[0] - b[0]).map(([, v]) => v);
+
+  const firstNonNull = <K extends keyof ExtractedStatement>(key: K) =>
+    ordered.find((p) => p[key] !== null)?.[key] ?? null;
+
+  const lastNonNull = <K extends keyof ExtractedStatement>(key: K) =>
+    [...ordered].reverse().find((p) => p[key] !== null)?.[key] ?? null;
+
+  return {
+    bankName: firstNonNull("bankName") as string | null,
+    accountNumberMasked: firstNonNull("accountNumberMasked") as string | null,
+    periodStart: firstNonNull("periodStart") as string | null,
+    periodEnd: lastNonNull("periodEnd") as string | null,
+    openingBalance: firstNonNull("openingBalance") as string | null,
+    closingBalance: lastNonNull("closingBalance") as string | null,
+    currency: firstNonNull("currency") as string | null,
+    containsMultipleStatements: ordered.some((p) => p.containsMultipleStatements),
+    transactions: ordered.flatMap((p) => p.transactions),
+  };
+}
+
 const SYSTEM_PROMPT = `You read bank statements and report exactly what they say.
 
-You are given a statement as numbered lines. Spacing is meaningful: it
+You are given ONE PAGE of a statement, as numbered lines. Other pages are read
+separately and the results are combined afterwards, so report only what is on
+this page. Do not guess at what came before or after it. Spacing is meaningful: it
 reproduces where text sits on the page. Columns line up, and a gap means that
 column is empty on that row.
 
@@ -121,8 +157,40 @@ Rules:
 - Every transaction must cite the page and line number it came from.
 - If a value is genuinely absent, use null. Never invent one, and never carry
   a value over from a neighbouring row.
+- Statement-level fields — bank, account number, period, opening and closing
+  balance — appear on whichever page prints them, often the first or the last.
+  Report them when this page shows them and null when it does not. Never
+  derive an opening or closing balance from the transactions.
+- A row continuing from the previous page, or a "balance brought forward"
+  line, is not a transaction on this page. Leave it out.
 - If the file contains statements for more than one account, set
   containsMultipleStatements to true.`;
+
+/**
+ * Extracts one page.
+ *
+ * Whole-document extraction outgrew the time a single serverless function is
+ * allowed: a sixteen-page statement spent more than sixty seconds generating
+ * its answer and was killed. Reading a page per call keeps every request
+ * small, works at any statement length, and needed no change to the pipeline
+ * — only to the size of the unit it advances by.
+ */
+export async function extractStatementPage(
+  pages: ParsedPage[],
+  pageNumber: number,
+): Promise<ExtractionResult> {
+  const page = pages.find((p) => p.pageNumber === pageNumber);
+
+  if (!page) {
+    return {
+      ok: false,
+      code: "extraction_failed",
+      message: `Page ${pageNumber} isn't in this document.`,
+    };
+  }
+
+  return runExtraction([page]);
+}
 
 export async function extractStatement(
   pages: ParsedPage[],
@@ -136,6 +204,10 @@ export async function extractStatement(
     };
   }
 
+  return runExtraction(pages);
+}
+
+async function runExtraction(pages: ParsedPage[]): Promise<ExtractionResult> {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return {

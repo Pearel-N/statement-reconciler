@@ -633,8 +633,7 @@ That is a real limitation and it affects real documents. The generated
 fixtures are three pages and finish comfortably; two genuine statements I
 tested with do not.
 
-**The fix is written, on the `page-by-page-extraction` branch, and not
-merged.**
+**The fix is written and now merged into `main`.**
 
 Extraction becomes one call per *page* rather than one per document. Each
 page's result is stored in `raw_extraction` keyed by page; when every page is
@@ -651,12 +650,21 @@ The pipeline needed no changes at all. It already advanced one stage per
 request; this only changes the size of the unit it advances by. That the fix
 was small is the strongest argument for the staging decision.
 
-**Why it isn't merged.** It is written and type-checked, with tests for the
-merge, but I have not validated it against enough real statements to be
-confident in it — each full run costs real money against my own API budget,
-and I would rather ship something tested than something plausible. Shipping an
-unverified rewrite of the extraction path, after submitting, to fix a failure
-that now at least reports itself honestly, is the wrong trade.
+**What it has and hasn't been through.** It is type-checked and has unit
+tests covering the merge — that rows stay in page order, that the opening
+balance comes from the earliest page that prints one and the closing from the
+latest, that identity fields are found on whichever page carries them, and
+that a field no page printed comes back null rather than invented. It has not
+been run end to end against a real multi-page statement. Each full run costs real
+money against my own API budget, and I stopped paying for runs once the
+process closed.
+
+It sat on a branch while this was under review, because shipping an unverified
+rewrite of the extraction path to fix a failure that at least reports itself
+honestly was the wrong trade at the time. That is no longer the trade: the
+review is over, and the branch was worth more on `main` than parked. So: the
+approach is sound and the merge logic is tested, and the path has never
+carried a real document. Both of those are true.
 
 The raising-the-timeout alternative was considered and rejected: a paid plan
 allows five minutes instead of one, which buys headroom rather than removing
