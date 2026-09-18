@@ -80,7 +80,7 @@ export default async function WorkspacePage({
           Every statement is checked against its own declared opening and
           closing balances. If the extracted transactions don&apos;t account
           for the difference, you&apos;ll be shown exactly which rows are
-          responsible — not asked to re-read the whole document.
+          responsible, not asked to re-read the whole document.
         </p>
 
         <div className="mt-6">
@@ -117,47 +117,47 @@ export default async function WorkspacePage({
                       href={`/w/${workspaceId}/s/${statement.id}`}
                       className="block px-4 py-3 transition hover:bg-stone-50"
                     >
-                    <div className="flex items-center gap-3">
-                      <span className="min-w-0 flex-1 truncate text-sm text-stone-800">
-                        {statement.filename}
-                      </span>
-                      <span className="shrink-0 font-mono text-xs text-stone-400">
-                        {formatBytes(statement.fileBytes)}
-                      </span>
-                      <span
-                        className={[
-                          "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
-                          STATUS_STYLE[statement.status] ??
+                      <div className="flex items-center gap-3">
+                        <span className="min-w-0 flex-1 truncate text-sm text-stone-800">
+                          {statement.filename}
+                        </span>
+                        <span className="shrink-0 font-mono text-xs text-stone-400">
+                          {formatBytes(statement.fileBytes)}
+                        </span>
+                        <span
+                          className={[
+                            "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                            STATUS_STYLE[statement.status] ??
                             "bg-stone-100 text-stone-600",
-                        ].join(" ")}
-                      >
-                        {statement.status.replace("_", " ")}
-                      </span>
-                    </div>
-
-                    <p className="mt-1 text-xs text-stone-500">
-                      {statement.bankName ? `${statement.bankName} · ` : ""}
-                      {statement._count.transactions} transactions
-                      {run && !run.isReconciled && (
-                        <span className="text-amber-700">
-                          {" · off by "}
-                          {run.discrepancy.toString()}
-                          {statement._count.flags > 0 &&
-                            ` · ${statement._count.flags} flagged`}
+                          ].join(" ")}
+                        >
+                          {statement.status.replace("_", " ")}
                         </span>
-                      )}
-                      {run?.isReconciled && (
-                        <span className="text-emerald-700">
-                          {" · reconciles exactly"}
-                        </span>
-                      )}
-                    </p>
+                      </div>
 
-                    {statement.errorDetail && (
-                      <p className="mt-1 text-xs leading-relaxed text-red-700">
-                        {statement.errorDetail}
+                      <p className="mt-1 text-xs text-stone-500">
+                        {statement.bankName ? `${statement.bankName} · ` : ""}
+                        {statement._count.transactions} transactions
+                        {run && !run.isReconciled && (
+                          <span className="text-amber-700">
+                            {" · off by "}
+                            {run.discrepancy.toString()}
+                            {statement._count.flags > 0 &&
+                              ` · ${statement._count.flags} flagged`}
+                          </span>
+                        )}
+                        {run?.isReconciled && (
+                          <span className="text-emerald-700">
+                            {" · reconciles exactly"}
+                          </span>
+                        )}
                       </p>
-                    )}
+
+                      {statement.errorDetail && (
+                        <p className="mt-1 text-xs leading-relaxed text-red-700">
+                          {statement.errorDetail}
+                        </p>
+                      )}
                     </Link>
                   </li>
                 );
