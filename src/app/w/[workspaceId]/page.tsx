@@ -77,7 +77,10 @@ export default async function WorkspacePage({
           Upload a statement
         </h1>
         <p className="mt-2 max-w-xl text-sm leading-relaxed text-stone-600">
-          stupid statement
+          Every statement is checked against its own declared opening and
+          closing balances. If the extracted transactions don;t account
+          for the difference, you;ll be shown exactly which rows are
+          responsible, not asked to re-read the whole document.
         </p>
 
         <div className="mt-6">
